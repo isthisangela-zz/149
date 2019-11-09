@@ -22,11 +22,17 @@ In this project we plan to use [DWM1001C](https://www.decawave.com/product/dwm10
 
 #### **Schedule**
 • November 8, Milestone 1:  We received most of our parts. Sarah and Angela are working on LoRa. Wendy and Francis made a switching circuit for the camera. Video.
+
 • November 17, Milestone 2:  Sarah and Angela work toward adapting LoRa Arduino library to nRF52832. Wendy will work on switch for UWB and GPS and implement switching logic on Sparkfun nRF52832. Francis will work on UWB ranging and displaying output on Buckler.
+
 • November 22:  Sarah and Angela continue adapting LoRa Arduino library to nRF52832. Wendy will make a compact circuit for tracking device and test switching the camera on and off over BLE or LoRa. Francis will continue on UWB ranging and displaying output on Buckler, possibly start GPS as time allows.
+
 • November 29: If there is time, implement GPS and/or WiFi positioning system with Mozilla Location Service. 
+
 • December 6: Testing: find someone with a cat and see if the device is usable/useful. Determine which technologies are helpful, what radio protocol offers the best performance, if the battery life is realistic, and if the device can be made small enough.
+
 • December 17: Demonstration video and poster made, powerpoint prepared. Project Expo.
+
 • December 20: Final report
 
 #### **Risks/Feasibility**
