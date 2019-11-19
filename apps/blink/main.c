@@ -1,6 +1,6 @@
 // Blink app
 //
-// Blinks the LEDs on Buckler
+// Blinks the LED on SPARKFUN
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -17,10 +17,10 @@
 #include "nrf_pwr_mgmt.h"
 #include "nrf_serial.h"
 
-#include "buckler.h"
+#include "sparkfun.h"
 
 // LED array
-static uint8_t LEDS[3] = {BUCKLER_LED0, BUCKLER_LED1, BUCKLER_LED2};
+static uint8_t LED = SPARKFUN_LED;
 
 int main(void) {
   ret_code_t error_code = NRF_SUCCESS;
@@ -34,17 +34,13 @@ int main(void) {
   // configure leds
   // manually-controlled (simple) output, initially set
   nrfx_gpiote_out_config_t out_config = NRFX_GPIOTE_CONFIG_OUT_SIMPLE(true);
-  for (int i=0; i<3; i++) {
-    error_code = nrfx_gpiote_out_init(LEDS[i], &out_config);
-    APP_ERROR_CHECK(error_code);
-  }
+  error_code = nrfx_gpiote_out_init(LED, &out_config);
+  APP_ERROR_CHECK(error_code);
 
   // loop forever
   while (1) {
-    for (int i=0; i<3; i++) {
-      nrf_gpio_pin_toggle(LEDS[i]);
-      nrf_delay_ms(500);
-    }
+    nrf_delay_ms(250); 
+    nrf_gpio_pin_toggle(LED);
   }
 }
 
