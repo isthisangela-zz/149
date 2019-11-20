@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <nrf_drv_spi.h>
+#include <RH_RF95.h>
 
 #include "app_error.h"
 #include "nrf.h"
