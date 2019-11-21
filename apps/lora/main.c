@@ -78,7 +78,30 @@ void handleInterrupt() {
 }
 
 
+void spiBurstWrite(uint8_t reg, uint8_t* write_buf, size_t len){
+  if (len > 256) return;
+  uint8_t buf[257];
+  buf[0] = 0x80 | reg;
+  memcpy(buf+1, write_buf, len);
 
+  nrf_drv_spi_init(spi_instance, &spi_config, NULL, NULL);
+  nrf_drv_spi_transfer(spi_instance, buf, len+1, NULL, 0);
+  nrf_drv_spi_uninit(spi_instance);
+}
+
+
+// reads a buffer of values
+void spiBurstRead(uint8_t reg, uint8_t* read_buf, size_t len){
+  if (len > 256) return;
+  uint8_t readreg = reg;
+  uint8_t buf[257];
+
+  nrf_drv_spi_init(spi_instance, &spi_config, NULL, NULL);
+  nrf_drv_spi_transfer(spi_instance, &readreg, 1, buf, len+1);
+  nrf_drv_spi_uninit(spi_instance);
+
+  memcpy(read_buf, buf+1, len);
+}
 
 // writes one uint8_t value
 void spiWrite(uint8_t reg, uint8_t val) {
