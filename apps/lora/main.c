@@ -39,14 +39,13 @@ nrf_gpio_cfg_output(RTC_WDI);
 nrf_gpio_pin_set(RTC_WDI);
 
 
-
+// Adapted from Radiohead:
 // C++ level interrupt handler for this instance
 // LORA is unusual in that it has several interrupt lines, and not a single, combined one.
 // On MiniWirelessLoRa, only one of the several interrupt lines (DI0) from the RFM95 is usefuly 
 // connnected to the processor.
 // We use this to get RxDone and TxDone interrupts
-void RH_RF95::handleInterrupt()
-{
+void handleInterrupt() {
     // Read the interrupt register
     uint8_t irq_flags = spiRead(RH_RF95_REG_12_IRQ_FLAGS);
     if (_mode == RHModeRx && irq_flags & (RH_RF95_RX_TIMEOUT | RH_RF95_PAYLOAD_CRC_ERROR)) {
@@ -78,10 +77,12 @@ void RH_RF95::handleInterrupt()
     spiWrite(RH_RF95_REG_12_IRQ_FLAGS, 0xff); // Clear all IRQ flags
 }
 
+void spiWrite(uint8_t buf, int len) {
 
-
-
-
+  nrf_drv_spi_init(spi_instance, &spi_config, NULL, NULL);
+  nrf_drv_spi_transfer(spi_instance, &readreg, 1, buf, len+1);
+  nrf_drv_spi_uninit(spi_instance);
+}
 
 // LED array
 static uint8_t LED = SPARKFUN_LED;
