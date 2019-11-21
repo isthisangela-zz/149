@@ -74,5 +74,8 @@
 // LoRa
 #define SPI_SCLK   NRF_GPIO_PIN_MAP(0,15)
 #define SPI_MISO   NRF_GPIO_PIN_MAP(0,14)
-#define SPI_MOSI   NRF_GPIO_PIN_MAP(0,13)
+#define SPI_MOSI   NRF_GPIO_PIN_MAP(1,13)
 #define RTC_CS     NRF_GPIO_PIN_MAP(0,12)
+#define RTC_WDI    NRF_GPIO_PIN_MAP(0, 11)
+
+

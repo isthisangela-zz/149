@@ -61,7 +61,7 @@ void handleInterrupt() {
     	_bufLen = len;
 	    spiWrite(RH_RF95_REG_12_IRQ_FLAGS, 0xff); // Clear all IRQ flags
 
-	    // Remember the RSSI of this packet
+	  // Remember the RSSI of this packet
       // this is according to the doc, but is it really correct?
       // weakest receiveable signals are reported RSSI at about -66
       _lastRssi = spiRead(RH_RF95_REG_1A_PKT_RSSI_VALUE) - 137;
@@ -77,12 +77,30 @@ void handleInterrupt() {
     spiWrite(RH_RF95_REG_12_IRQ_FLAGS, 0xff); // Clear all IRQ flags
 }
 
-void spiWrite(uint8_t buf, int len) {
 
+
+
+// writes one uint8_t value
+void spiWrite(uint8_t reg, uint8_t val) {
+  uint8_t buf[2];
+  buf[0] = 0x80 | reg;
+  memcpy(buf+1, &val, 1);
   nrf_drv_spi_init(spi_instance, &spi_config, NULL, NULL);
-  nrf_drv_spi_transfer(spi_instance, &readreg, 1, buf, len+1);
+  nrf_drv_spi_transfer(spi_instance, &buf, 1, NULL, 0);
   nrf_drv_spi_uninit(spi_instance);
 }
+
+
+// reads one uint8_t value
+uint8_t spiRead(uint8_t reg) {
+  uint8_t buf;
+  nrf_drv_spi_init(spi_instance, &spi_config, NULL, NULL);
+  nrf_drv_spi_transfer(spi_instance, &reg, 1, &buf, 1);
+  nrf_drv_spi_uninit(spi_instance);
+
+  return buf;
+}
+
 
 // LED array
 static uint8_t LED = SPARKFUN_LED;
