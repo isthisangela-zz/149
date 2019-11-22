@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <RH_RF95.h>
 
+#include "pthreads.h"
 #include "app_error.h"
 #include "nrf.h"
 #include "nrf_delay.h"
@@ -37,6 +38,52 @@ spi_config.bit_order  = NRF_DRV_SPI_BIT_ORDER_MSB_FIRST;
 
 nrf_gpio_cfg_output(RTC_WDI);
 nrf_gpio_pin_set(RTC_WDI);
+
+void setModeTx() {
+    if (spi_config.mode != RHModeTx)
+    {
+	spiWrite(RH_RF95_REG_01_OP_MODE, RH_RF95_MODE_TX);
+	spiWrite(RH_RF95_REG_40_DIO_MAPPING1, 0x40); // Interrupt on TxDone
+	spi_config.mode = RHModeTx;
+    }
+}
+
+void setModeIdle() {
+    if (spi_config.mode != RHModeIdle)
+    {
+	spiWrite(RH_RF95_REG_01_OP_MODE, RH_RF95_MODE_STDBY);
+	spi_config.mode = RHModeIdle;
+    }
+}
+
+bool waitPacketSent() {
+	while (spi_config.mode == RHModeTx)
+		pthread_yield();
+	return true;
+}
+
+bool send(const uint8_t* data, uint8_t len) {
+    if (len > RH_RF95_MAX_MESSAGE_LEN)
+	return false;
+
+    waitPacketSent(); // Make sure we dont interrupt an outgoing message
+    setModeIdle();
+
+    // Position at the beginning of the FIFO
+    spiWrite(RH_RF95_REG_0D_FIFO_ADDR_PTR, 0);
+    // The headers
+    spiWrite(RH_RF95_REG_00_FIFO, _txHeaderTo);
+    spiWrite(RH_RF95_REG_00_FIFO, _txHeaderFrom);
+    spiWrite(RH_RF95_REG_00_FIFO, _txHeaderId);
+    spiWrite(RH_RF95_REG_00_FIFO, _txHeaderFlags);
+    // The message data
+    spiBurstWrite(RH_RF95_REG_00_FIFO, data, len);
+    spiWrite(RH_RF95_REG_22_PAYLOAD_LENGTH, len + RH_RF95_HEADER_LEN);
+
+    setModeTx(); // Start the transmitter
+    // when Tx is done, interruptHandler will fire and radio mode will return to STANDBY
+    return true;
+}
 
 
 // Adapted from Radiohead:
