@@ -9,7 +9,7 @@
 //
 // Author: Mike McCauley (mikem@airspayce.com)
 // Copyright (C) 2011 Mike McCauley
-// $Id: RHMesh.cpp,v 1.9 2015/08/13 02:45:47 mikem Exp $
+// $Id: RHMesh.cpp,v 1.11 2019/09/06 04:40:40 mikem Exp $
 
 #include <RHMesh.h>
 
@@ -107,8 +107,8 @@ void RHMesh::peekAtMessage(RoutedMessage* message, uint8_t messageLen)
 	    if (d->route[i] == _thisAddress)
 		break;
 	i++;
-	while (i++ < numRoutes)
-	    addRouteTo(d->route[i], headerFrom());
+	while (i < numRoutes)
+	    addRouteTo(d->route[i++], headerFrom());
     }
     else if (   messageLen > 1 
 	     && m->msgType == RH_MESH_MESSAGE_TYPE_ROUTE_FAILURE)
@@ -197,10 +197,17 @@ bool RHMesh::recvfromAck(uint8_t* buf, uint8_t* len, uint8_t* source, uint8_t* d
 		if (d->route[i] == _thisAddress)
 		    return false; // Already been through us. Discard
 	    
+	        
+            addRouteTo(_source, headerFrom()); // The originator needs to be added regardless of node type
+
 	    // Hasnt been past us yet, record routes back to the earlier nodes
-	    addRouteTo(_source, headerFrom()); // The originator
-	    for (i = 0; i < numRoutes; i++)
-		addRouteTo(d->route[i], headerFrom());
+            // No need to waste memory if we are not participating in routing
+            if (_isa_router)
+            {
+	        for (i = 0; i < numRoutes; i++)
+		    addRouteTo(d->route[i], headerFrom());
+            }
+
 	    if (isPhysicalAddress(&d->dest, d->destlen))
 	    {
 		// This route discovery is for us. Unicast the whole route back to the originator
@@ -209,7 +216,7 @@ bool RHMesh::recvfromAck(uint8_t* buf, uint8_t* len, uint8_t* source, uint8_t* d
 		d->header.msgType = RH_MESH_MESSAGE_TYPE_ROUTE_DISCOVERY_RESPONSE;
 		RHRouter::sendtoWait((uint8_t*)d, tmpMessageLen, _source);
 	    }
-	    else if (i < _max_hops)
+	    else if ((i < _max_hops) && _isa_router)
 	    {
 		// Its for someone else, rebroadcast it, after adding ourselves to the list
 		d->route[numRoutes] = _thisAddress;

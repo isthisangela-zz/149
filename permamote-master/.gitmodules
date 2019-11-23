@@ -1,0 +1,6 @@
+[submodule "simulator/influx-query"]
+	path = simulator/influx-query
+	url = https://github.com/lab11/influx-query.git
+[submodule "software/nrf52x-base"]
+	path = software/nrf52x-base
+	url = https://github.com/lab11/nrf52x-base.git

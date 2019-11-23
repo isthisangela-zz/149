@@ -1,7 +1,7 @@
 // RH_ASK.h
 //
 // Copyright (C) 2014 Mike McCauley
-// $Id: RH_ASK.h,v 1.15 2016/04/04 01:40:12 mikem Exp mikem $
+// $Id: RH_ASK.h,v 1.20 2019/11/02 02:34:22 mikem Exp mikem $
 
 #ifndef RH_ASK_h
 #define RH_ASK_h
@@ -147,16 +147,17 @@
 /// - Receivers
 ///  - RX-B1 (433.92MHz) (also known as ST-RX04-ASK)
 ///  - RFM83C from HopeRF http://www.hoperfusa.com/details.jsp?pid=126
+///  - SYN480R and other similar ASK receivers
 /// - Transmitters: 
 ///  - TX-C1 (433.92MHz)
 ///  - RFM85 from HopeRF http://www.hoperfusa.com/details.jsp?pid=127
+///  - SYN115, F115 and other similar ASK transmitters
 /// - Transceivers
 ///  - DR3100 (433.92MHz)
 ///
 /// \par Connecting to Arduino
 ///
 /// Most transmitters can be connected to Arduino like this:
-
 /// \code
 /// Arduino                         Transmitter
 ///  GND------------------------------GND
@@ -190,8 +191,10 @@
 /// If you run the chip at 1MHz, you will get RK_ASK speeds 1/8th of the expected.
 ///
 /// Initialise RH_ASK for ATTiny85 like this:
+/// \code
 /// // #include <SPI.h> // comment this out, not needed
 /// RH_ASK driver(2000, 4, 3); // 200bps, TX on D3 (pin 2), RX on D4 (pin 3)
+/// \endcode
 /// then:
 /// Connect D3 (pin 2) as the output to the transmitter
 /// Connect D4 (pin 3) as the input from the receiver.
@@ -238,6 +241,13 @@
 /// library, when built for ATTiny85, takes over timer 0, which prevents use
 /// of millis() etc but does permit analog outputs. This will affect the accuracy of millis() and time
 /// measurement.
+///
+/// \par  STM32 F4 Discovery with Arduino and Arduino_STM32
+/// You can initialise the driver like this:
+/// \code
+/// RH_ASK driver(2000, PA3, PA4);
+/// \endcode
+/// and connect the serail to pins PA3 and PA4
 class RH_ASK : public RHGenericDriver
 {
 public:
@@ -272,7 +282,7 @@ public:
     /// \param[in] buf Location to copy the received message
     /// \param[in,out] len Pointer to available space in buf. Set to the actual number of octets copied.
     /// \return true if a valid message was copied to buf
-    virtual bool    recv(uint8_t* buf, uint8_t* len);
+    RH_INTERRUPT_ATTR virtual bool    recv(uint8_t* buf, uint8_t* len);
 
     /// Waits until any previous transmit packet is finished being transmitted with waitPacketSent().
     /// Then loads a message into the transmitter and starts the transmitter. Note that a message length
@@ -289,18 +299,18 @@ public:
 
     /// If current mode is Rx or Tx changes it to Idle. If the transmitter or receiver is running, 
     /// disables them.
-    void           setModeIdle();
+    RH_INTERRUPT_ATTR void           setModeIdle();
 
     /// If current mode is Tx or Idle, changes it to Rx. 
     /// Starts the receiver in the RF69.
-    void           setModeRx();
+    RH_INTERRUPT_ATTR void           setModeRx();
 
     /// If current mode is Rx or Idle, changes it to Rx. F
     /// Starts the transmitter in the RF69.
     void           setModeTx();
 
     /// dont call this it used by the interrupt handler
-    void            handleTimerInterrupt();
+    RH_INTERRUPT_ATTR void            handleTimerInterrupt();
 
     /// Returns the current speed in bits per second
     /// \return The current speed in bits per second
@@ -319,7 +329,7 @@ protected:
     void            timerSetup();
 
     /// Read the rxPin in a platform dependent way, taking into account whether it is inverted or not
-    bool            readRx();
+    RH_INTERRUPT_ATTR bool            readRx();
 
     /// Write the txPin in a platform dependent way
     void            writeTx(bool value);
@@ -328,7 +338,7 @@ protected:
     void            writePtt(bool value);
 
     /// Translates a 6 bit symbol to its 4 bit plaintext equivalent
-    uint8_t         symbol_6to4(uint8_t symbol);
+    RH_INTERRUPT_ATTR uint8_t         symbol_6to4(uint8_t symbol);
 
     /// The receiver handler function, called a 8 times the bit rate
     void            receiveTimer();
