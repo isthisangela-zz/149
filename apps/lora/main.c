@@ -5,9 +5,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <RH_RF95.h>
+#include <RH_NRF51.h>
+//#include <RH_RF95.h>
 
-#include "pthreads.h"
+#include "pthread.h"
 #include "app_error.h"
 #include "nrf.h"
 #include "nrf_delay.h"
@@ -27,6 +28,8 @@
 
 static const nrf_drv_spi_t* spi_instance;
 static nrf_drv_spi_config_t spi_config = NRF_DRV_SPI_DEFAULT_CONFIG;
+uint8_t _buf[RH_NRF51_MAX_PAYLOAD_LEN+1];
+
 
 spi_config.sck_pin    = SPI_SCLK;
 spi_config.miso_pin   = SPI_MISO;
@@ -39,14 +42,78 @@ spi_config.bit_order  = NRF_DRV_SPI_BIT_ORDER_MSB_FIRST;
 nrf_gpio_cfg_output(RTC_WDI);
 nrf_gpio_pin_set(RTC_WDI);
 
-void setModeTx() {
+
+bool init() {
+    // Enable the High Frequency clock to the system as a whole
+    NRF_CLOCK->EVENTS_HFCLKSTARTED = 0;
+    NRF_CLOCK->TASKS_HFCLKSTART = 1;
+    /* Wait for the external oscillator to start up */
+    while (NRF_CLOCK->EVENTS_HFCLKSTARTED == 0) { }
+    
+    // Enables the DC/DC converter when the radio is enabled. Need this!
+    NRF_POWER->DCDCEN = 0x00000001; 
+
+    // Disable and reset the radio
+    NRF_RADIO->POWER = RADIO_POWER_POWER_Disabled;
+    NRF_RADIO->POWER = RADIO_POWER_POWER_Enabled;
+    NRF_RADIO->EVENTS_DISABLED = 0;
+    NRF_RADIO->TASKS_DISABLE   = 1;
+    // Wait until we are in DISABLE state
+    while (NRF_RADIO->EVENTS_DISABLED == 0) {}
+
+    // Physical on-air address is set in PREFIX0 + BASE0 by setNetworkAddress
+    NRF_RADIO->TXADDRESS    = 0x00;	// Use logical address 0 (PREFIX0 + BASE0)
+    NRF_RADIO->RXADDRESSES  = 0x01;	// Enable reception on logical address 0 (PREFIX0 + BASE0)
+
+    // Configure the CRC
+    NRF_RADIO->CRCCNF = (RADIO_CRCCNF_LEN_Two << RADIO_CRCCNF_LEN_Pos); // Number of checksum bits
+    NRF_RADIO->CRCINIT = 0xFFFFUL;      // Initial value      
+    NRF_RADIO->CRCPOLY = 0x11021UL;     // CRC poly: x^16+x^12^x^5+1
+
+    // These shorts will make the radio transition from Ready to Start to Disable automatically
+    // for both TX and RX, which makes for much shorter on-air times
+    NRF_RADIO->SHORTS = (RADIO_SHORTS_READY_START_Enabled << RADIO_SHORTS_READY_START_Pos)
+	              | (RADIO_SHORTS_END_DISABLE_Enabled << RADIO_SHORTS_END_DISABLE_Pos);
+
+    NRF_RADIO->PCNF0 = ((8 << RADIO_PCNF0_LFLEN_Pos) & RADIO_PCNF0_LFLEN_Msk); // Payload length in bits
+
+    // Make sure we are powered down
+    setModeIdle();
+
+    // Set a default network address
+    uint8_t default_network_address[] = {0xE7, 0xE7, 0xE7, 0xE7, 0xE7};
+    setNetworkAddress(default_network_address, sizeof(default_network_address));
+
+    setChannel(2); // The default, in case it was set by another app without powering down
+    setRF(RH_NRF51::DataRate2Mbps, RH_NRF51::TransmitPower0dBm);
+
+    return true;
+}
+
+
+
+// void setModeTx() {
+//     if (spi_config.mode != RHModeTx)
+//     {
+// 	spiWrite(RH_RF95_REG_01_OP_MODE, RH_RF95_MODE_TX);
+// 	spiWrite(RH_RF95_REG_40_DIO_MAPPING1, 0x40); // Interrupt on TxDone
+// 	spi_config.mode = RHModeTx;
+//     }
+// }
+
+void setModeTx()
+{
     if (spi_config.mode != RHModeTx)
     {
-	spiWrite(RH_RF95_REG_01_OP_MODE, RH_RF95_MODE_TX);
-	spiWrite(RH_RF95_REG_40_DIO_MAPPING1, 0x40); // Interrupt on TxDone
+	setModeIdle(); // Can only start RX from DISABLE state
+	// Radio will transition automatically to Disable state at the end of transmission
+	NRF_RADIO->PACKETPTR = (uint32_t)_buf;
+	NRF_RADIO->EVENTS_DISABLED = 0U; // So we can detect end of transmission
+	NRF_RADIO->TASKS_TXEN = 1;
 	spi_config.mode = RHModeTx;
     }
 }
+
 
 void setModeIdle() {
     if (spi_config.mode != RHModeIdle)
@@ -62,28 +129,49 @@ bool waitPacketSent() {
 	return true;
 }
 
-bool send(const uint8_t* data, uint8_t len) {
-    if (len > RH_RF95_MAX_MESSAGE_LEN)
+
+bool send(const uint8_t* data, uint8_t len)
+{
+    if (len > RH_NRF51_MAX_MESSAGE_LEN)
 	return false;
+    // Set up the headers
+    _buf[0] = len + RH_NRF51_HEADER_LEN;
+    _buf[1] = 0xff;
+    _buf[2] = 0xff;
+    _buf[3] = 0;
+    _buf[4] = 0;
+    memcpy(_buf+RH_NRF51_HEADER_LEN+1, data, len);
 
-    waitPacketSent(); // Make sure we dont interrupt an outgoing message
-    setModeIdle();
-
-    // Position at the beginning of the FIFO
-    spiWrite(RH_RF95_REG_0D_FIFO_ADDR_PTR, 0);
-    // The headers
-    spiWrite(RH_RF95_REG_00_FIFO, _txHeaderTo);
-    spiWrite(RH_RF95_REG_00_FIFO, _txHeaderFrom);
-    spiWrite(RH_RF95_REG_00_FIFO, _txHeaderId);
-    spiWrite(RH_RF95_REG_00_FIFO, _txHeaderFlags);
-    // The message data
-    spiBurstWrite(RH_RF95_REG_00_FIFO, data, len);
-    spiWrite(RH_RF95_REG_22_PAYLOAD_LENGTH, len + RH_RF95_HEADER_LEN);
-
-    setModeTx(); // Start the transmitter
-    // when Tx is done, interruptHandler will fire and radio mode will return to STANDBY
+    _rxBufValid = false;
+    setModeTx();
+    // Radio will return to Disabled state after transmission is complete
+    _txGood++;
     return true;
 }
+
+
+// bool send(const uint8_t* data, uint8_t len) {
+//     if (len > RH_RF95_MAX_MESSAGE_LEN)
+// 	return false;
+
+//     waitPacketSent(); // Make sure we dont interrupt an outgoing message
+//     setModeIdle();
+
+//     // Position at the beginning of the FIFO
+//     spiWrite(RH_RF95_REG_0D_FIFO_ADDR_PTR, 0);
+//     // The headers
+//     spiWrite(RH_RF95_REG_00_FIFO, _txHeaderTo);
+//     spiWrite(RH_RF95_REG_00_FIFO, _txHeaderFrom);
+//     spiWrite(RH_RF95_REG_00_FIFO, _txHeaderId);
+//     spiWrite(RH_RF95_REG_00_FIFO, _txHeaderFlags);
+//     // The message data
+//     spiBurstWrite(RH_RF95_REG_00_FIFO, data, len);
+//     spiWrite(RH_RF95_REG_22_PAYLOAD_LENGTH, len + RH_RF95_HEADER_LEN);
+
+//     setModeTx(); // Start the transmitter
+//     // when Tx is done, interruptHandler will fire and radio mode will return to STANDBY
+//     return true;
+// }
 
 
 // Adapted from Radiohead:
