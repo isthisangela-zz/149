@@ -21,7 +21,6 @@
 #include "nrf_log_default_backends.h"
 #include "nrf_pwr_mgmt.h"
 #include "nrf_drv_spi.h"
-
  
 #define RFM95_CS 10
 #define RFM95_RST 9
@@ -35,46 +34,47 @@
 
 #define RTC_WDI    NRF_GPIO_PIN_MAP(0, 11)
 
+#define RH_RF95_FIFO_SIZE 255
+#define RH_RF95_MAX_PAYLOAD_LEN RH_RF95_FIFO_SIZE
+
+#define RH_RF95_HEADER_LEN 4
+#define RH_RF95_REG_00_FIFO                                0x00
+#define RH_RF95_REG_01_OP_MODE                             0x01
+#define RH_RF95_REG_40_DIO_MAPPING1                        0x40
+#define RH_RF95_MODE_TX                               0x03
+#define RH_RF95_MODE_STDBY                            0x01
+#define RH_RF95_REG_22_PAYLOAD_LENGTH                      0x22
+#define RH_RF95_REG_0D_FIFO_ADDR_PTR                       0x0d
+#define RH_RF95_MAX_MESSAGE_LEN (RH_RF95_MAX_PAYLOAD_LEN - RH_RF95_HEADER_LEN)
+
 
 // Change to 434.0 or other frequency, must match RX's freq!
 #define RF95_FREQ 915.0
 
+
+typedef enum {
+  RHModeInitialising = 0, ///< Transport is initialising. Initial default value until init() is called..
+  RHModeSleep,            ///< Transport hardware is in low power sleep mode (if supported)
+  RHModeIdle,             ///< Transport is idle.
+  RHModeTx,               ///< Transport is in the process of transmitting a message.
+  RHModeRx,               ///< Transport is in the process of receiving a message.
+  RHModeCad               ///< Transport is in the process of detecting channel activity (if supported)
+} RHMode;
+
 volatile RHMode     _mode;
+nrf_drv_spi_t *spi_instance;
+nrf_drv_spi_config_t spi_config;
+uint8_t _txHeaderFlags = 0;
+uint8_t _txHeaderId = 0;
+uint8_t _txHeaderTo = RH_BROADCAST_ADDRESS;
+uint8_t _txHeaderFrom = RH_BROADCAST_ADDRESS;
 
 
-int main(void) {
-  ret_code_t error_code = NRF_SUCCESS;
-  // initialize RTT library
-  error_code = NRF_LOG_INIT(NULL);
-  APP_ERROR_CHECK(error_code);
-  NRF_LOG_DEFAULT_BACKENDS_INIT();
-  printf("Log initialized!\n");
 
-    // initialize LED
-  nrf_gpio_pin_dir_set(7, NRF_GPIO_PIN_DIR_OUTPUT);
-
-  nrf_drv_spi_t *spi_instance = &NRF_DRV_SPI_INSTANCE(1);
-
-  nrf_drv_spi_config_t spi_config = {
-    .sck_pin = SPI_SCLK,
-    .mosi_pin = SPI_MOSI,
-    .miso_pin = SPI_MISO,
-    .ss_pin = RFM95_CS,
-    .irq_priority = NRFX_SPI_DEFAULT_CONFIG_IRQ_PRIORITY,
-    .orc = 0,
-    .frequency = NRF_DRV_SPI_FREQ_4M,
-    .mode = NRF_DRV_SPI_MODE_2,
-    .bit_order = NRF_DRV_SPI_BIT_ORDER_MSB_FIRST
-  };
-
-  nrf_gpio_cfg_output(RTC_WDI);
-  nrf_gpio_pin_set(RTC_WDI);
-
-  setup();
-
-  while (1) {
-    loop();
-  }
+bool waitPacketSent() {
+  while (_mode == RHModeTx)
+    YIELD; // Wait for any previous transmit to finish
+  return true;
 }
 
 void setup() {
@@ -115,6 +115,34 @@ void setup() {
  
 int16_t packetnum = 0;  // packet counter, we increment per xmission
  
+
+bool send(const uint8_t* data, uint8_t len) {
+  if (len > RH_RF95_MAX_MESSAGE_LEN)
+    return false;
+
+  waitPacketSent(); // Make sure we dont interrupt an outgoing message
+  setModeIdle();
+
+  if (!waitCAD()) 
+    return false;  // Check channel activity
+
+  // Position at the beginning of the FIFO
+  spiWrite(RH_RF95_REG_0D_FIFO_ADDR_PTR, 0);
+  // The headers
+  spiWrite(RH_RF95_REG_00_FIFO, _txHeaderTo);
+  spiWrite(RH_RF95_REG_00_FIFO, _txHeaderFrom);
+  spiWrite(RH_RF95_REG_00_FIFO, _txHeaderId);
+  spiWrite(RH_RF95_REG_00_FIFO, _txHeaderFlags);
+  // The message data
+  spiBurstWrite(RH_RF95_REG_00_FIFO, data, len);
+  spiWrite(RH_RF95_REG_22_PAYLOAD_LENGTH, len + RH_RF95_HEADER_LEN);
+
+  setModeTx(); // Start the transmitter
+  // when Tx is done, interruptHandler will fire and radio mode will return to STANDBY
+  return true;
+}
+
+
 void loop() {
   printf("Sending to rf95_server");
   // Send a message to rf95_server
@@ -155,40 +183,6 @@ void loop() {
   }
   delay(1000);
 }
-
-
-bool send(const uint8_t* data, uint8_t len) {
-  if (len > RH_RF95_MAX_MESSAGE_LEN)
-    return false;
-
-  waitPacketSent(); // Make sure we dont interrupt an outgoing message
-  setModeIdle();
-
-  if (!waitCAD()) 
-    return false;  // Check channel activity
-
-  // Position at the beginning of the FIFO
-  spiWrite(RH_RF95_REG_0D_FIFO_ADDR_PTR, 0);
-  // The headers
-  spiWrite(RH_RF95_REG_00_FIFO, _txHeaderTo);
-  spiWrite(RH_RF95_REG_00_FIFO, _txHeaderFrom);
-  spiWrite(RH_RF95_REG_00_FIFO, _txHeaderId);
-  spiWrite(RH_RF95_REG_00_FIFO, _txHeaderFlags);
-  // The message data
-  spiBurstWrite(RH_RF95_REG_00_FIFO, data, len);
-  spiWrite(RH_RF95_REG_22_PAYLOAD_LENGTH, len + RH_RF95_HEADER_LEN);
-
-  setModeTx(); // Start the transmitter
-  // when Tx is done, interruptHandler will fire and radio mode will return to STANDBY
-  return true;
-}
-
-bool waitPacketSent() {
-  while (_mode == RHModeTx)
-    YIELD; // Wait for any previous transmit to finish
-  return true;
-}
-
 
 void setModeIdle() {
   if (_mode != RHModeIdle) {
@@ -252,4 +246,41 @@ void setModeTx() {
   }
 }
 
+
+int main(void) {
+  ret_code_t error_code = NRF_SUCCESS;
+  // initialize RTT library
+  error_code = NRF_LOG_INIT(NULL);
+  APP_ERROR_CHECK(error_code);
+  NRF_LOG_DEFAULT_BACKENDS_INIT();
+  printf("Log initialized!\n");
+
+    // initialize LED
+  nrf_gpio_pin_dir_set(7, NRF_GPIO_PIN_DIR_OUTPUT);
+
+  spi_instance = &NRF_DRV_SPI_INSTANCE(1);
+
+  nrf_drv_spi_config_t config = {
+    .sck_pin = SPI_SCLK,
+    .mosi_pin = SPI_MOSI,
+    .miso_pin = SPI_MISO,
+    .ss_pin = RFM95_CS,
+    .irq_priority = NRFX_SPI_DEFAULT_CONFIG_IRQ_PRIORITY,
+    .orc = 0,
+    .frequency = NRF_DRV_SPI_FREQ_4M,
+    .mode = NRF_DRV_SPI_MODE_2,
+    .bit_order = NRF_DRV_SPI_BIT_ORDER_MSB_FIRST
+  };
+
+  spi_config = config;
+
+  nrf_gpio_cfg_output(RTC_WDI);
+  nrf_gpio_pin_set(RTC_WDI);
+
+  setup();
+
+  while (1) {
+    loop();
+  }
+}
 
