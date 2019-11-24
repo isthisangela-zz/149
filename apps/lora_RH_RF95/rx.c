@@ -100,8 +100,7 @@ void loop() {
     uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
     uint8_t len = sizeof(buf);
     
-    if (recv(buf, &len))
-    {
+    if (recv(buf, &len)) {
       digitalWrite(LED, HIGH);
       printf("Got: ");
       printf((char*)buf);
