@@ -13,7 +13,6 @@
 
 #include <NRFDriver.h>
 
-
 int main(void) {
     nrf_power_dcdcen_set(1);
 
