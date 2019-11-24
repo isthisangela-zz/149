@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <pthread.h>
+#include<time.h>
 
 #include "app_error.h"
 #include "app_timer.h"
@@ -54,7 +55,17 @@
 #define RH_RF95_REG_4D_PA_DAC                              0x4d
 #define RH_RF95_PA_DAC_DISABLE                        0x04
 #define RH_RF95_PA_SELECT                             0x80
+#define RH_RF95_REG_08_FRF_LSB                             0x08
+#define RH_RF95_REG_07_FRF_MID                             0x07
+#define RH_RF95_REG_06_FRF_MSB                             0x06
 
+#define RH_RF95_FXOSC 32000000.0
+#define RH_RF95_FSTEP  (RH_RF95_FXOSC / 524288)
+#define RH_NRF51_HEADER_LEN 7
+
+// This is the maximum number of bytes that can be carried by the nRF51.
+// We use some for headers, keeping fewer for RadioHead messages
+#define RH_NRF51_MAX_PAYLOAD_LEN 254
 
 
 // Change to 434.0 or other frequency, must match RX's freq!
@@ -77,7 +88,101 @@ uint8_t _txHeaderFlags = 0;
 uint8_t _txHeaderId = 0;
 uint8_t _txHeaderTo = RH_BROADCAST_ADDRESS;
 uint8_t _txHeaderFrom = RH_BROADCAST_ADDRESS;
+bool _usingHFport = true;
+/// TO header in the last received mesasge
+volatile uint8_t    _rxHeaderTo;
+/// FROM header in the last received mesasge
+volatile uint8_t    _rxHeaderFrom;
+/// ID header in the last received mesasge
+volatile uint8_t    _rxHeaderId;
+/// FLAGS header in the last received mesasge
+volatile uint8_t    _rxHeaderFlags;
+/// Whether the transport is in promiscuous mode
+bool                _promiscuous;
+/// Count of the number of successfully transmitted messaged
+volatile uint16_t   _rxGood;
+/// This node id
+uint8_t             _thisAddress;
+/// Count of the number of bad messages (eg bad checksum etc) received
+volatile uint16_t   _rxBad;
+uint8_t             _buf[RH_NRF51_MAX_PAYLOAD_LEN+1];
+/// True when there is a valid message in the buffer
+volatile bool       _rxBufValid;
 
+
+
+void clearRxBuf() {
+    _rxBufValid = false;
+    _buf[1] = 0;
+}
+
+// writes one uint8_t value
+void spiWrite(uint8_t reg, uint8_t val) {
+  uint8_t buf[2];
+  buf[0] = 0x80 | reg;
+  memcpy(buf+1, &val, 1);
+  nrf_drv_spi_init(spi_instance, &spi_config, NULL, NULL);
+  nrf_drv_spi_transfer(spi_instance, &buf, 1, NULL, 0);
+  nrf_drv_spi_uninit(spi_instance);
+}
+
+void setModeIdle() {
+  if (_mode != RHModeIdle) {
+    spiWrite(RH_RF95_REG_01_OP_MODE, RH_RF95_MODE_STDBY);
+    _mode = RHModeIdle;
+  }
+}
+
+void setModeRx() {
+  if (_mode != RHModeRx) {
+    setModeIdle(); // Can only start RX from DISABLE state
+
+    // Radio will transition automatically to Disable state when a message is received
+    NRF_RADIO->PACKETPTR = (uint32_t)_buf;
+    NRF_RADIO->EVENTS_READY = 0U;
+    NRF_RADIO->TASKS_RXEN = 1;
+    NRF_RADIO->EVENTS_END = 0U; // So we can detect end of reception
+    _mode = RHModeRx;
+  }
+}
+
+// Check whether the latest received message is complete and uncorrupted
+void validateRxBuf() {
+  if (_buf[1] < RH_NRF51_HEADER_LEN)
+    return; // Too short to be a real message
+  // Extract the 4 headers following S0, LEN and S1
+  _rxHeaderTo    = _buf[3];
+  _rxHeaderFrom  = _buf[4];
+  _rxHeaderId    = _buf[5];
+  _rxHeaderFlags = _buf[6];
+
+  if (_promiscuous || _rxHeaderTo == _thisAddress || _rxHeaderTo == RH_BROADCAST_ADDRESS) {
+    _rxGood++;
+    _rxBufValid = true;
+  }
+}
+
+bool available() {
+  if (!_rxBufValid) {
+    if (_mode == RHModeTx)
+      return false;
+    setModeRx();
+    if (!NRF_RADIO->EVENTS_END)
+      return false; // No message yet
+    setModeIdle();
+
+    if (!NRF_RADIO->CRCSTATUS) {
+      // Bad CRC, restart the radio     
+      _rxBad++;
+      setModeRx();
+      return false;
+    }
+    validateRxBuf(); 
+    if (!_rxBufValid)
+      setModeRx(); // Try for another
+    }
+  return _rxBufValid;
+}
 
 bool recv(uint8_t* buf, uint8_t* len) {
   if (!available())
@@ -128,23 +233,6 @@ uint8_t spiRead(uint8_t reg) {
   return buf;
 }
 
-// writes one uint8_t value
-void spiWrite(uint8_t reg, uint8_t val) {
-  uint8_t buf[2];
-  buf[0] = 0x80 | reg;
-  memcpy(buf+1, &val, 1);
-  nrf_drv_spi_init(spi_instance, &spi_config, NULL, NULL);
-  nrf_drv_spi_transfer(spi_instance, &buf, 1, NULL, 0);
-  nrf_drv_spi_uninit(spi_instance);
-}
-
-void setModeIdle() {
-  if (_mode != RHModeIdle) {
-    spiWrite(RH_RF95_REG_01_OP_MODE, RH_RF95_MODE_STDBY);
-    _mode = RHModeIdle;
-  }
-}
-
 void setModeTx() {
   if (_mode != RHModeTx) {
     spiWrite(RH_RF95_REG_01_OP_MODE, RH_RF95_MODE_TX);
@@ -152,7 +240,6 @@ void setModeTx() {
     _mode = RHModeTx;
   }
 }
-
 
 void setTxPower(int8_t power, bool useRFO) {
   // Sigh, different behaviours depending on whther the module use PA_BOOST or the RFO pin
@@ -185,6 +272,17 @@ void setTxPower(int8_t power, bool useRFO) {
     // My measurements show 20dBm is correct
     spiWrite(RH_RF95_REG_09_PA_CONFIG, RH_RF95_PA_SELECT | (power-5));
   }
+}
+
+bool setFrequency(float centre) {
+  // Frf = FRF / FSTEP
+  uint32_t frf = (centre * 1000000.0) / RH_RF95_FSTEP;
+  spiWrite(RH_RF95_REG_06_FRF_MSB, (frf >> 16) & 0xff);
+  spiWrite(RH_RF95_REG_07_FRF_MID, (frf >> 8) & 0xff);
+  spiWrite(RH_RF95_REG_08_FRF_LSB, frf & 0xff);
+  _usingHFport = (centre >= 779.0);
+
+  return true;
 }
 
 bool waitPacketSent() {
@@ -249,12 +347,12 @@ bool send(const uint8_t* data, uint8_t len) {
 }
 
 bool waitAvailableTimeout(uint16_t timeout) {
-  unsigned long starttime = millis();
-  while ((millis() - starttime) < timeout) {
+  unsigned long starttime = clock();
+  while ((clock() - starttime) < timeout) {
     if (available()) {
       return true;
     }
-    pthread_yield();
+    pthread_yield();  
   }
   return false;
 }
@@ -283,8 +381,7 @@ void loop() {
   if (waitAvailableTimeout(1000)) { 
     // Should be a reply message for us now   
     if (recv(buf, &len)) {
-      printf("Got reply: ");
-      printf((char*)buf);
+      printf("Got reply");
     }
     else {
       printf("Receive failed");
