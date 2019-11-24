@@ -11,7 +11,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <pthread.h>
-#include<time.h>
+#include <time.h>
 
 #include "app_error.h"
 #include "app_timer.h"
@@ -81,6 +81,25 @@ typedef enum {
   RHModeCad               ///< Transport is in the process of detecting channel activity (if supported)
 } RHMode;
 
+typedef enum {
+  DataRate1Mbps = 0,   ///< 1 Mbps
+  DataRate2Mbps,       ///< 2 Mbps
+  DataRate250kbps      ///< 250 kbps
+} DataRate;
+
+/// \brief Convenient values for setting transmitter power in setRF()
+typedef enum {
+  // Add 20dBm for nRF24L01p with PA and LNA modules
+  TransmitPower4dBm = 0,        ///<  4 dBm
+  TransmitPower0dBm,            ///<  0 dBm
+  TransmitPowerm4dBm,           ///< -4 dBm
+  TransmitPowerm8dBm,           ///< -8 dBm
+  TransmitPowerm12dBm,          ///< -12 dBm
+  TransmitPowerm16dBm,          ///< -16 dBm
+  TransmitPowerm20dBm,          ///< -20 dBm
+  TransmitPowerm30dBm,          ///< -30 dBm
+} TransmitPower;
+
 volatile RHMode     _mode;
 nrf_drv_spi_t *spi_instance;
 nrf_drv_spi_config_t spi_config;
@@ -108,8 +127,6 @@ volatile uint16_t   _rxBad;
 uint8_t             _buf[RH_NRF51_MAX_PAYLOAD_LEN+1];
 /// True when there is a valid message in the buffer
 volatile bool       _rxBufValid;
-
-
 
 void clearRxBuf() {
     _rxBufValid = false;
@@ -160,6 +177,30 @@ void validateRxBuf() {
     _rxGood++;
     _rxBufValid = true;
   }
+}
+
+
+bool setChannel(uint8_t channel) {
+  NRF_RADIO->FREQUENCY = ((channel << RADIO_FREQUENCY_FREQUENCY_Pos) & RADIO_FREQUENCY_FREQUENCY_Msk);
+  return true;
+}
+
+bool setNetworkAddress(uint8_t* address, uint8_t len) {
+  if (len < 3 || len > 5)
+    return false;
+
+  // First byte is the prefix, remainder are base
+  NRF_RADIO->PREFIX0    = ((address[0] << RADIO_PREFIX0_AP0_Pos) & RADIO_PREFIX0_AP0_Msk);
+  uint32_t base;
+  memcpy(&base, address+1, len-1);
+  NRF_RADIO->BASE0 = base;
+
+  NRF_RADIO->PCNF1 =  (
+    (((sizeof(_buf)) << RADIO_PCNF1_MAXLEN_Pos)  & RADIO_PCNF1_MAXLEN_Msk)  // maximum length of payload
+    | (((0UL)        << RADIO_PCNF1_STATLEN_Pos) & RADIO_PCNF1_STATLEN_Msk) // expand the payload with 0 bytes
+    | (((len-1)      << RADIO_PCNF1_BALEN_Pos)   & RADIO_PCNF1_BALEN_Msk)); // base address length in number of bytes.
+
+  return true;
 }
 
 bool available() {
@@ -291,6 +332,90 @@ bool waitPacketSent() {
   return true;
 }
 
+bool setRF(DataRate data_rate, TransmitPower power) {
+  uint8_t mode;
+  uint8_t p;
+
+  if (data_rate == DataRate2Mbps)
+    mode = RADIO_MODE_MODE_Nrf_2Mbit;
+  else if (data_rate == DataRate1Mbps)
+    mode = RADIO_MODE_MODE_Nrf_1Mbit;
+  else if (data_rate == DataRate250kbps)
+    mode = RADIO_MODE_MODE_Nrf_250Kbit;
+  else
+    return false;// Invalid
+
+  if      (power == TransmitPower4dBm)
+    p = RADIO_TXPOWER_TXPOWER_Pos4dBm;
+  else if (power == TransmitPower0dBm)
+    p = RADIO_TXPOWER_TXPOWER_0dBm;
+  else if (power == TransmitPowerm4dBm)
+    p = RADIO_TXPOWER_TXPOWER_Neg4dBm;
+  else if (power == TransmitPowerm8dBm)
+    p = RADIO_TXPOWER_TXPOWER_Neg8dBm;
+  else if (power == TransmitPowerm12dBm)
+    p = RADIO_TXPOWER_TXPOWER_Neg12dBm;
+  else if (power == TransmitPowerm16dBm)
+    p = RADIO_TXPOWER_TXPOWER_Neg16dBm;
+  else if (power == TransmitPowerm20dBm)
+    p = RADIO_TXPOWER_TXPOWER_Neg20dBm;
+  else if (power == TransmitPowerm30dBm)
+    p = RADIO_TXPOWER_TXPOWER_Neg30dBm;
+  else
+    return false; // Invalid
+
+
+  NRF_RADIO->TXPOWER = ((p << RADIO_TXPOWER_TXPOWER_Pos) & RADIO_TXPOWER_TXPOWER_Msk);
+  NRF_RADIO->MODE    = ((mode << RADIO_MODE_MODE_Pos) & RADIO_MODE_MODE_Msk);
+
+  return true;
+}
+
+bool init() {
+    // Enable the High Frequency clock to the system as a whole
+    NRF_CLOCK->EVENTS_HFCLKSTARTED = 0;
+    NRF_CLOCK->TASKS_HFCLKSTART = 1;
+    /* Wait for the external oscillator to start up */
+    while (NRF_CLOCK->EVENTS_HFCLKSTARTED == 0);
+    
+    // Disable and reset the radio
+    NRF_RADIO->POWER = RADIO_POWER_POWER_Disabled;
+    NRF_RADIO->POWER = RADIO_POWER_POWER_Enabled;
+    NRF_RADIO->EVENTS_DISABLED = 0;
+    NRF_RADIO->TASKS_DISABLE   = 1;
+    // Wait until we are in DISABLE state
+    while (NRF_RADIO->EVENTS_DISABLED == 0) {}
+
+    // Physical on-air address is set in PREFIX0 + BASE0 by setNetworkAddress
+    NRF_RADIO->TXADDRESS    = 0x00; // Use logical address 0 (PREFIX0 + BASE0)
+    NRF_RADIO->RXADDRESSES  = 0x01; // Enable reception on logical address 0 (PREFIX0 + BASE0)
+
+    // Configure the CRC
+    NRF_RADIO->CRCCNF = (RADIO_CRCCNF_LEN_Two << RADIO_CRCCNF_LEN_Pos); // Number of checksum bits
+    NRF_RADIO->CRCINIT = 0xFFFFUL;      // Initial value      
+    NRF_RADIO->CRCPOLY = 0x11021UL;     // CRC poly: x^16+x^12^x^5+1
+
+    // These shorts will make the radio transition from Ready to Start to Disable automatically
+    // for both TX and RX, which makes for much shorter on-air times
+    NRF_RADIO->SHORTS = (RADIO_SHORTS_READY_START_Enabled << RADIO_SHORTS_READY_START_Pos)
+                | (RADIO_SHORTS_END_DISABLE_Enabled << RADIO_SHORTS_END_DISABLE_Pos);
+
+    NRF_RADIO->PCNF0 =   (8 << RADIO_PCNF0_LFLEN_Pos) // Payload size length in bits
+                 | (1 << RADIO_PCNF0_S0LEN_Pos) // S0 is 1 octet
+                 | (8 << RADIO_PCNF0_S1LEN_Pos); // S1 is 1 octet
+
+    // Make sure we are powered down
+    setModeIdle();
+
+    // Set a default network address
+    uint8_t default_network_address[] = {0xE7, 0xE7, 0xE7, 0xE7, 0xE7};
+    setNetworkAddress(default_network_address, sizeof(default_network_address));
+
+    setChannel(2); // The default, in case it was set by another app without powering down
+    setRF(DataRate2Mbps, TransmitPower0dBm);
+    return true;
+}
+
 void setup() {
   nrf_gpio_pin_dir_set(RFM95_RST, NRF_GPIO_PIN_DIR_OUTPUT);
   //digitalWrite(RFM95_RST, HIGH);
@@ -300,7 +425,7 @@ void setup() {
   nrf_gpio_pin_write(RFM95_RST, 0);
   nrf_delay_ms(10);
   nrf_gpio_pin_write(RFM95_RST, 1);
-  delay(10);
+  nrf_delay_ms(10);
   while (!init()) {
     printf("LoRa radio init failed");
     while (1);
@@ -326,9 +451,6 @@ bool send(const uint8_t* data, uint8_t len) {
 
   waitPacketSent(); // Make sure we dont interrupt an outgoing message
   setModeIdle();
-
-  if (!waitCAD()) 
-    return false;  // Check channel activity
 
   // Position at the beginning of the FIFO
   spiWrite(RH_RF95_REG_0D_FIFO_ADDR_PTR, 0);
@@ -370,14 +492,14 @@ void loop() {
   send((uint8_t *)radiopacket, 20);
  
   printf("Waiting for packet to complete...");
-  delay(10);
+  nrf_delay_ms(10);
   waitPacketSent();
   // Now wait for a reply
   uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
   uint8_t len = sizeof(buf);
  
   printf("Waiting for reply...");
-  delay(10);
+  nrf_delay_ms(10);
   if (waitAvailableTimeout(1000)) { 
     // Should be a reply message for us now   
     if (recv(buf, &len)) {
@@ -390,9 +512,8 @@ void loop() {
   else {
     printf("No reply, is there a listener around?");
   }
-  delay(1000);
+  nrf_delay_ms(1000);
 }
-
 
 int main(void) {
   ret_code_t error_code = NRF_SUCCESS;
