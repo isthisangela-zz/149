@@ -331,7 +331,7 @@ bool waitPacketSent() {
     pthread_yield(); // Wait for any previous transmit to finish
   return true;
 }
-
+  
 bool setRF(DataRate data_rate, TransmitPower power) {
   uint8_t mode;
   uint8_t p;
