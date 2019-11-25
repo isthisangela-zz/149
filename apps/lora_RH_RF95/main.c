@@ -139,7 +139,7 @@ void spiWrite(uint8_t reg, uint8_t val) {
   buf[0] = 0x80 | reg;
   memcpy(buf+1, &val, 1);
   nrf_drv_spi_init(spi_instance, &spi_config, NULL, NULL);
-  nrf_drv_spi_transfer(spi_instance, &buf, 1, NULL, 0);
+  nrf_drv_spi_transfer(spi_instance, buf, 1, NULL, 0);
   nrf_drv_spi_uninit(spi_instance);
 }
 
@@ -460,7 +460,8 @@ bool send(const uint8_t* data, uint8_t len) {
   spiWrite(RH_RF95_REG_00_FIFO, _txHeaderId);
   spiWrite(RH_RF95_REG_00_FIFO, _txHeaderFlags);
   // The message data
-  spiBurstWrite(RH_RF95_REG_00_FIFO, data, len);
+  uint8_t tdata = *data;
+  spiBurstWrite(RH_RF95_REG_00_FIFO, &tdata, len);
   spiWrite(RH_RF95_REG_22_PAYLOAD_LENGTH, len + RH_RF95_HEADER_LEN);
 
   setModeTx(); // Start the transmitter
@@ -526,7 +527,8 @@ int main(void) {
     // initialize LED
   nrf_gpio_pin_dir_set(7, NRF_GPIO_PIN_DIR_OUTPUT);
 
-  spi_instance = &NRF_DRV_SPI_INSTANCE(1);
+  //spi_instance = &NRF_DRV_SPI_INSTANCE(1);
+  spi_instance = { 1, { .spi = NRFX_SPI_INSTANCE(1) }, false };
 
   nrf_drv_spi_config_t config = {
     .sck_pin = SPI_SCLK,

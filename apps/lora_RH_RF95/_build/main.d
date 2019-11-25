@@ -58,7 +58,7 @@ _build/main.o: main.c \
  ../../nrf52x-base//sdk/nrf5_sdk_15.3.0/components/libraries/util/app_error_weak.h \
  ../../nrf52x-base//sdk/nrf5_sdk_15.3.0/components/libraries/timer/app_timer.h \
  ../../nrf52x-base//make/config/nrf52832/config/sdk_config.h \
- /Users/francis/Projects/149/board/sparkfun/./app_config.h \
+ /Users/zqr/Documents/149/board/sparkfun/./app_config.h \
  ../../nrf52x-base//sdk/nrf5_sdk_15.3.0/components/libraries/util/app_util.h \
  ../../nrf52x-base//sdk/nrf5_sdk_15.3.0/modules/nrfx/mdk/compiler_abstraction.h \
  ../../nrf52x-base//sdk/nrf5_sdk_15.3.0/components/softdevice/s132/headers/nrf52/nrf_mbr.h \
