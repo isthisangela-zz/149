@@ -116,9 +116,9 @@ typedef struct
 /**
  * @brief Macro for creating an SPI master driver instance.
  */
-#define NRF_DRV_SPI_INSTANCE(id)    NRF_DRV_SPI_INSTANCE_(id)
+#define NRF_DRV_SPI_INSTANCE    NRF_DRV_SPI_INSTANCE_(id)
 #define NRF_DRV_SPI_INSTANCE_(id)   NRF_DRV_SPI_INSTANCE_ ## id
-#if NRFX_CHECK(NRFX_SPIM0_ENABLED)
+ #if NRFX_CHECK(NRFX_SPIM0_ENABLED)
     #define NRF_DRV_SPI_INSTANCE_0 \
         { 0, { .spim = NRFX_SPIM_INSTANCE(0) }, true }
 #elif NRFX_CHECK(NRFX_SPI0_ENABLED)
@@ -139,6 +139,8 @@ typedef struct
     #define NRF_DRV_SPI_INSTANCE_2 \
         { 2, { .spi = NRFX_SPI_INSTANCE(2) }, false }
 #endif
+
+
 
 /**
  * @brief This value can be provided instead of a pin number for signals MOSI,
