@@ -1,0 +1,5 @@
+r
+loadfile _build/blink_sdk15_s132.hex 
+r
+g
+exit
