@@ -348,12 +348,12 @@ void clearRxBuf() {
 void spiWrite(uint8_t reg, uint8_t val) {
   printf("\n%u\n", reg);
   printf("\n%u\n", val);
-  uint8_t buf[2];
+  uint8_t buf[257];
   buf[0] = 0x80 | reg;
   memcpy(buf+1, &val, 1);
   nrf_drv_spi_init(spi_instance, &spi_config, NULL, NULL);
   printf("\n%x\n", buf);
-  nrf_drv_spi_transfer(spi_instance, buf, 1, NULL, 0);
+  nrf_drv_spi_transfer(spi_instance, buf, 2, NULL, 0);
   printf("init\n");
   nrf_drv_spi_uninit(spi_instance);
   printf("init\n");
@@ -521,6 +521,9 @@ void setPreambleLength(uint16_t bytes) {
 
 //bool RH_RF95::init()
 bool init() {
+
+	nrf_gpio_pin_dir_set(RFM95_CS, NRF_GPIO_PIN_DIR_OUTPUT);
+  	nrf_gpio_pin_write(RFM95_CS, 1);
      // Set sleep mode, so we can also set LORA mode:
     printf("spiWrite");
     spiWrite(RH_RF95_REG_01_OP_MODE, RH_RF95_MODE_SLEEP | RH_RF95_LONG_RANGE_MODE);
@@ -762,7 +765,7 @@ int main(void) {
     .irq_priority = NRFX_SPI_DEFAULT_CONFIG_IRQ_PRIORITY,
     .orc = 0,
     .frequency = NRF_DRV_SPI_FREQ_1M,
-    .mode = NRF_DRV_SPI_MODE_0,
+    .mode = NRF_DRV_SPI_MODE_1,
     .bit_order = NRF_DRV_SPI_BIT_ORDER_MSB_FIRST
   };
 
