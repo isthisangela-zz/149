@@ -231,15 +231,15 @@
 // Reset
 #define RFM95_RST   NRF_GPIO_PIN_MAP(0,15)
 // Slave/chip select
-#define RFM95_CS    NRF_GPIO_PIN_MAP(0,13)
+#define RFM95_CS    NRF_GPIO_PIN_MAP(0,5)
 // Master out, slave in
-#define SPI_MOSI    NRF_GPIO_PIN_MAP(0,12)
+#define SPI_MOSI    NRF_GPIO_PIN_MAP(0,4)
 // Master in, slave out
-#define SPI_MISO    NRF_GPIO_PIN_MAP(0,11)
+#define SPI_MISO    NRF_GPIO_PIN_MAP(0,3)
 // Clock
-#define SPI_SCLK    NRF_GPIO_PIN_MAP(0,10)
+#define SPI_SCLK    NRF_GPIO_PIN_MAP(0,2)
 // Interrupt
-#define RFM95_INT   NRF_GPIO_PIN_MAP(0, 9)
+#define RFM95_INT   NRF_GPIO_PIN_MAP(0,1)
 
 
 #define RH_RF95_FIFO_SIZE 255
@@ -335,7 +335,7 @@ volatile bool       _rxBufValid;
 
 
 static nrf_drv_spi_t instance = NRF_DRV_SPI_INSTANCE(1);
-const *const nrf_drv_spi_t spi_instance;
+const nrf_drv_spi_t* spi_instance;
 
 
 
@@ -348,12 +348,12 @@ void clearRxBuf() {
 void spiWrite(uint8_t reg, uint8_t val) {
   printf("\n%u\n", reg);
   printf("\n%u\n", val);
-  uint8_t buf[2];
+  uint8_t buf[257];
   buf[0] = 0x80 | reg;
   memcpy(buf+1, &val, 1);
   nrf_drv_spi_init(spi_instance, &spi_config, NULL, NULL);
-  printf("\n%x\n", buf);
-  nrf_drv_spi_transfer(spi_instance, buf, 1, NULL, 0);
+  printf("\nbuffer: %x\n", *buf);
+  nrf_drv_spi_transfer(spi_instance, buf, 2, NULL, 0);
   printf("init\n");
   nrf_drv_spi_uninit(spi_instance);
   printf("init\n");
@@ -521,40 +521,42 @@ void setPreambleLength(uint16_t bytes) {
 
 //bool RH_RF95::init()
 bool init() {
-     // Set sleep mode, so we can also set LORA mode:
-    printf("spiWrite");
-    spiWrite(RH_RF95_REG_01_OP_MODE, RH_RF95_MODE_SLEEP | RH_RF95_LONG_RANGE_MODE);
-    nrf_delay_ms(10); // Wait for sleep mode to take over from say, CAD
-    // Check we are in sleep mode, with LORA set
-    if (spiRead(RH_RF95_REG_01_OP_MODE) != (RH_RF95_MODE_SLEEP | RH_RF95_LONG_RANGE_MODE)) {
-      return false; // No device present?
-    }
-    // Set up FIFO
-    // We configure so that we can use the entire 256 byte FIFO for either receive
-    // or transmit, but not both at the same time
-    spiWrite(RH_RF95_REG_0E_FIFO_TX_BASE_ADDR, 0);
-    spiWrite(RH_RF95_REG_0F_FIFO_RX_BASE_ADDR, 0);
+	nrf_gpio_pin_dir_set(RFM95_CS, NRF_GPIO_PIN_DIR_OUTPUT);
+	nrf_gpio_pin_write(RFM95_CS, 1);
+   // Set sleep mode, so we can also set LORA mode:
+  printf("spiWrite");
+  spiWrite(RH_RF95_REG_01_OP_MODE, RH_RF95_MODE_SLEEP | RH_RF95_LONG_RANGE_MODE);
+  nrf_delay_ms(10); // Wait for sleep mode to take over from say, CAD
+  // Check we are in sleep mode, with LORA set
+  if (spiRead(RH_RF95_REG_01_OP_MODE) != (RH_RF95_MODE_SLEEP | RH_RF95_LONG_RANGE_MODE)) {
+    return false; // No device present?
+  }
+  // Set up FIFO
+  // We configure so that we can use the entire 256 byte FIFO for either receive
+  // or transmit, but not both at the same time
+  spiWrite(RH_RF95_REG_0E_FIFO_TX_BASE_ADDR, 0);
+  spiWrite(RH_RF95_REG_0F_FIFO_RX_BASE_ADDR, 0);
 
-    // Packet format is preamble + explicit-header + payload + crc
-    // Explicit Header Mode
-    // payload is TO + FROM + ID + FLAGS + message data
-    // RX mode is implmented with RXCONTINUOUS
-    // max message data length is 255 - 4 = 251 octets
-    printf("setModeIdle");
-    setModeIdle();
+  // Packet format is preamble + explicit-header + payload + crc
+  // Explicit Header Mode
+  // payload is TO + FROM + ID + FLAGS + message data
+  // RX mode is implmented with RXCONTINUOUS
+  // max message data length is 255 - 4 = 251 octets
+  printf("setModeIdle");
+  setModeIdle();
 
-    // Set up default configuration
-    // No Sync Words in LORA mode.
+  // Set up default configuration
+  // No Sync Words in LORA mode.
 
-    //setModemConfig(0); // Radio default
-    //setModemConfig(Bw125Cr48Sf4096); // slow and reliable?
-    setPreambleLength(8); // Default is 8
-    // An innocuous ISM frequency, same as RF22's
-    setFrequency(915.0);
-    // Lowish power
-    setTxPower(13, false);
+  //setModemConfig(0); // Radio default
+  //setModemConfig(Bw125Cr48Sf4096); // slow and reliable?
+  setPreambleLength(8); // Default is 8
+  // An innocuous ISM frequency, same as RF22's
+  setFrequency(915.0);
+  // Lowish power
+  setTxPower(13, false);
 
-    return true;
+  return true;
 }
 
 void handleInterrupts(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action) {
@@ -693,7 +695,6 @@ bool waitAvailableTimeout(uint16_t timeout) {
     if (available()) {
       return true;
     }
-    //pthread_yield();  
   }
   return false;
 }
@@ -762,7 +763,7 @@ int main(void) {
     .irq_priority = NRFX_SPI_DEFAULT_CONFIG_IRQ_PRIORITY,
     .orc = 0,
     .frequency = NRF_DRV_SPI_FREQ_1M,
-    .mode = NRF_DRV_SPI_MODE_2,
+    .mode = NRF_DRV_SPI_MODE_0,
     .bit_order = NRF_DRV_SPI_BIT_ORDER_MSB_FIRST
   };
 
