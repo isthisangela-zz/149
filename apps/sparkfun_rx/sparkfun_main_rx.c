@@ -335,7 +335,7 @@ volatile bool       _rxBufValid;
 
 
 static nrf_drv_spi_t instance = NRF_DRV_SPI_INSTANCE(1);
-static const nrf_drv_spi_t* spi_instance;
+const *const nrf_drv_spi_t spi_instance;
 
 
 
@@ -762,7 +762,7 @@ int main(void) {
     .irq_priority = NRFX_SPI_DEFAULT_CONFIG_IRQ_PRIORITY,
     .orc = 0,
     .frequency = NRF_DRV_SPI_FREQ_1M,
-    .mode = NRF_DRV_SPI_MODE_0,
+    .mode = NRF_DRV_SPI_MODE_2,
     .bit_order = NRF_DRV_SPI_BIT_ORDER_MSB_FIRST
   };
 
