@@ -342,11 +342,11 @@ void clearRxBuf() {
 
 // writes one uint8_t value
 void spiWrite(uint8_t reg, uint8_t val) {
-  uint8_t buf[2];
+  uint8_t buf[257];
   buf[0] = 0x80 | reg;
   memcpy(buf+1, &val, 1);
   nrf_drv_spi_init(spi_instance, &spi_config, NULL, NULL);
-  nrf_drv_spi_transfer(spi_instance, buf, 1, NULL, 0);
+  ret_code_t err = nrf_drv_spi_transfer(spi_instance, buf, 2, NULL, 0);
   nrf_drv_spi_uninit(spi_instance);
 }
 
@@ -437,12 +437,11 @@ void spiBurstRead(uint8_t reg, uint8_t* read_buf, size_t len){
 
 // reads one uint8_t value
 uint8_t spiRead(uint8_t reg) {
-  uint8_t buf;
+  uint8_t buf[2];
   nrf_drv_spi_init(spi_instance, &spi_config, NULL, NULL);
-  nrf_drv_spi_transfer(spi_instance, &reg, 1, &buf, 1);
+  ret_code_t err = nrf_drv_spi_transfer(spi_instance, &reg, 1, buf, 2);
   nrf_drv_spi_uninit(spi_instance);
-
-  return buf;
+  return buf[1];
 }
 
 void setModeTx() {
@@ -606,13 +605,17 @@ bool send(const uint8_t* data, uint8_t len) {
   spiWrite(RH_RF95_REG_22_PAYLOAD_LENGTH, len + RH_RF95_HEADER_LEN);
 
   setModeTx(); // Start the transmitter
+  printf("TxDone\n");
   // when Tx is done, interruptHandler will fire and radio mode will return to STANDBY
   return true;
 }
 
 bool waitAvailableTimeout(uint16_t timeout) {
-  unsigned long starttime = clock();
-  while ((clock() - starttime) < timeout) {
+  uint16_t counter = 0;
+  while (counter < timeout) {
+    counter += 200;
+    nrf_delay_ms(200);
+    printf("waiting... \n");
     if (available()) {
       return true;
     }
@@ -622,37 +625,38 @@ bool waitAvailableTimeout(uint16_t timeout) {
 }
 
 void loop() {
-  printf("Sending to rf95_server");
+  printf("Sending to rf95_server\n");
   // Send a message to rf95_server
   
   char radiopacket[20] = "Hello World #      ";
   itoa(packetnum++, radiopacket+13, 10);
   radiopacket[19] = 0;
   
-  printf("Sending...");
+  printf("Sending...\n");
   nrf_delay_ms(10);
   send((uint8_t *)radiopacket, 20);
  
-  printf("Waiting for packet to complete...");
+  printf("Waiting for packet to complete...\n");
   nrf_delay_ms(10);
   waitPacketSent();
   // Now wait for a reply
   uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
   uint8_t len = sizeof(buf);
  
-  printf("Waiting for reply...");
-  nrf_delay_ms(10);
-  if (waitAvailableTimeout(1000)) { 
+  printf("Waiting for reply...\n");
+  nrf_delay_ms(500);
+  // if (waitAvailableTimeout(1000)) { 
+  if (true) {
     // Should be a reply message for us now   
     if (recv(buf, &len)) {
-      printf("Got reply");
+      printf("Got reply\n");
     }
     else {
-      printf("Receive failed");
+      printf("Receive failed\n");
     }
   }
   else {
-    printf("No reply, is there a listener around?");
+    printf("No reply, is there a listener around?\n");
   }
   nrf_delay_ms(1000);
 }
@@ -705,20 +709,20 @@ int main(void) {
 
   nrf_gpio_pin_dir_set(RFM95_RST, NRF_GPIO_PIN_DIR_OUTPUT);
   nrf_gpio_pin_write(RFM95_RST, 1);
-  printf("Arduino LoRa TX Test!");
+  printf("Arduino LoRa TX Test!\n");
   // manual reset
   nrf_gpio_pin_write(RFM95_RST, 0);
   nrf_delay_ms(10);
   nrf_gpio_pin_write(RFM95_RST, 1);
   nrf_delay_ms(10);
   while (!init()) {
-    printf("LoRa radio init failed");
+    printf("LoRa radio init failed\n");
     while (1);
   }
-  printf("LoRa radio init OK!");
+  printf("LoRa radio init OK!\n");
 
   if (!setFrequency(RF95_FREQ)) {
-    printf("setFrequency failed");
+    printf("setFrequency failed\n");
     while (1);
   }
   // Defaults after init are 434.0MHz, 13dBm, Bw = 125 kHz, Cr = 4/5, Sf = 128chips/symbol, CRC on

@@ -346,17 +346,12 @@ void clearRxBuf() {
 
 // writes one uint8_t value
 void spiWrite(uint8_t reg, uint8_t val) {
-  printf("\n%u\n", reg);
-  printf("\n%u\n", val);
   uint8_t buf[257];
   buf[0] = 0x80 | reg;
   memcpy(buf+1, &val, 1);
   nrf_drv_spi_init(spi_instance, &spi_config, NULL, NULL);
-  printf("\nbuffer: %x\n", *buf);
-  nrf_drv_spi_transfer(spi_instance, buf, 2, NULL, 0);
-  printf("init\n");
+  ret_code_t err = nrf_drv_spi_transfer(spi_instance, buf, 2, NULL, 0);
   nrf_drv_spi_uninit(spi_instance);
-  printf("init\n");
 }
 
 void setModeIdle() {
@@ -446,12 +441,13 @@ void spiBurstRead(uint8_t reg, uint8_t* read_buf, size_t len){
 
 // reads one uint8_t value
 uint8_t spiRead(uint8_t reg) {
-  uint8_t buf;
+  uint8_t buf[2];
   nrf_drv_spi_init(spi_instance, &spi_config, NULL, NULL);
-  nrf_drv_spi_transfer(spi_instance, &reg, 1, &buf, 1);
+  ret_code_t err = nrf_drv_spi_transfer(spi_instance, &reg, 1, buf, 2);
+  printf("Error? : %x\n", err);
+  printf("%x\n", buf[1]);
   nrf_drv_spi_uninit(spi_instance);
-
-  return buf;
+  return buf[1];
 }
 
 void setModeTx() {
@@ -524,11 +520,12 @@ bool init() {
 	nrf_gpio_pin_dir_set(RFM95_CS, NRF_GPIO_PIN_DIR_OUTPUT);
 	nrf_gpio_pin_write(RFM95_CS, 1);
    // Set sleep mode, so we can also set LORA mode:
-  printf("spiWrite");
   spiWrite(RH_RF95_REG_01_OP_MODE, RH_RF95_MODE_SLEEP | RH_RF95_LONG_RANGE_MODE);
   nrf_delay_ms(10); // Wait for sleep mode to take over from say, CAD
   // Check we are in sleep mode, with LORA set
   if (spiRead(RH_RF95_REG_01_OP_MODE) != (RH_RF95_MODE_SLEEP | RH_RF95_LONG_RANGE_MODE)) {
+    printf("(RH_RF95_MODE_SLEEP | RH_RF95_LONG_RANGE_MODE): %x\n", (RH_RF95_MODE_SLEEP | RH_RF95_LONG_RANGE_MODE));
+    printf("RH_RF95_REG_01_OP_MODE: %x\n", RH_RF95_REG_01_OP_MODE);
     return false; // No device present?
   }
   // Set up FIFO
@@ -542,7 +539,6 @@ bool init() {
   // payload is TO + FROM + ID + FLAGS + message data
   // RX mode is implmented with RXCONTINUOUS
   // max message data length is 255 - 4 = 251 octets
-  printf("setModeIdle");
   setModeIdle();
 
   // Set up default configuration
@@ -560,6 +556,7 @@ bool init() {
 }
 
 void handleInterrupts(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action) {
+  printf("Interrupt \n");
   // Read the interrupt register
   uint8_t irq_flags = spiRead(RH_RF95_REG_12_IRQ_FLAGS);
   // Read the RegHopChannel register to check if CRC presence is signalled
@@ -594,77 +591,6 @@ void handleInterrupts(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action) {
 }
 
 
-// // C++ level interrupt handler for this instance
-// // LORA is unusual in that it has several interrupt lines, and not a single, combined one.
-// // On MiniWirelessLoRa, only one of the several interrupt lines (DI0) from the RFM95 is usefuly 
-// // connnected to the processor.
-// // We use this to get RxDone and TxDone interrupts
-// void handleInterrupt() {
-//     // Read the interrupt register
-//     uint8_t irq_flags = spiRead(RH_RF95_REG_12_IRQ_FLAGS);
-//     // Read the RegHopChannel register to check if CRC presence is signalled
-//     // in the header. If not it might be a stray (noise) packet.*
-//     uint8_t crc_present = spiRead(RH_RF95_REG_1C_HOP_CHANNEL);
-
-//     if (_mode == RHModeRx
-//   && ((irq_flags & (RH_RF95_RX_TIMEOUT | RH_RF95_PAYLOAD_CRC_ERROR))
-//       | !(crc_present & RH_RF95_RX_PAYLOAD_CRC_IS_ON)))
-// //    if (_mode == RHModeRx && irq_flags & (RH_RF95_RX_TIMEOUT | RH_RF95_PAYLOAD_CRC_ERROR))
-//     {
-//   _rxBad++;
-//     }
-//     else if (_mode == RHModeRx && irq_flags & RH_RF95_RX_DONE)
-//     {
-//   // Have received a packet
-//   uint8_t len = spiRead(RH_RF95_REG_13_RX_NB_BYTES);
-
-//   // Reset the fifo read ptr to the beginning of the packet
-//   spiWrite(RH_RF95_REG_0D_FIFO_ADDR_PTR, spiRead(RH_RF95_REG_10_FIFO_RX_CURRENT_ADDR));
-//   spiBurstRead(RH_RF95_REG_00_FIFO, _buf, len);
-//   _bufLen = len;
-//   spiWrite(RH_RF95_REG_12_IRQ_FLAGS, 0xff); // Clear all IRQ flags
-
-//   // Remember the last signal to noise ratio, LORA mode
-//   // Per page 111, SX1276/77/78/79 datasheet
-//   _lastSNR = (int8_t)spiRead(RH_RF95_REG_19_PKT_SNR_VALUE) / 4;
-
-//   // Remember the RSSI of this packet, LORA mode
-//   // this is according to the doc, but is it really correct?
-//   // weakest receiveable signals are reported RSSI at about -66
-//   _lastRssi = spiRead(RH_RF95_REG_1A_PKT_RSSI_VALUE);
-//   // Adjust the RSSI, datasheet page 87
-//   if (_lastSNR < 0)
-//       _lastRssi = _lastRssi + _lastSNR;
-//   else
-//       _lastRssi = (int)_lastRssi * 16 / 15;
-//   if (_usingHFport)
-//       _lastRssi -= 157;
-//   else
-//       _lastRssi -= 164;
-      
-//   // We have received a message.
-//   validateRxBuf(); 
-//   if (_rxBufValid)
-//       setModeIdle(); // Got one 
-//     }
-//     else if (_mode == RHModeTx && irq_flags & RH_RF95_TX_DONE)
-//     {
-//   _txGood++;
-//   setModeIdle();
-//     }
-//     else if (_mode == RHModeCad && irq_flags & RH_RF95_CAD_DONE)
-//     {
-//         _cad = irq_flags & RH_RF95_CAD_DETECTED;
-//         setModeIdle();
-//     }
-//     // Sigh: on some processors, for some unknown reason, doing this only once does not actually
-//     // clear the radio's interrupt flag. So we do it twice. Why?
-//     spiWrite(RH_RF95_REG_12_IRQ_FLAGS, 0xff); // Clear all IRQ flags
-//     spiWrite(RH_RF95_REG_12_IRQ_FLAGS, 0xff); // Clear all IRQ flags
-// }
- 
-int16_t packetnum = 0;  // packet counter, we increment per xmission
-
 bool send(const uint8_t* data, uint8_t len) {
   if (len > RH_RF95_MAX_MESSAGE_LEN)
     return false;
@@ -690,17 +616,23 @@ bool send(const uint8_t* data, uint8_t len) {
 }
 
 bool waitAvailableTimeout(uint16_t timeout) {
-  unsigned long starttime = clock();
-  while ((clock() - starttime) < timeout) {
+  unsigned long starttime = time(NULL);
+  while ((time(NULL) - starttime) < timeout) {
+    nrf_delay_ms(200);
+    printf("waiting... \n");
+    printf("%lu\n", (time(NULL) - starttime));
     if (available()) {
       return true;
     }
+    //pthread_yield();  
   }
   return false;
 }
 
 void loop() {
- if (available()) {
+  printf("in loop\n");
+  if (available()) {
+    printf("available\n");
     // Should be a message for us now   
     uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
     uint8_t len = sizeof(buf);
@@ -708,16 +640,16 @@ void loop() {
     
     if (recv(buf, &len)) {
       nrf_gpio_pin_clear(LED);
-      printf("Got something");
+      printf("Got something\n");
       printf("\n");
       // Send a reply
-      uint8_t data[] = "And hello back to you";
+      uint8_t data[] = "And hello back to you\n";
       send(data, sizeof(data));
       waitPacketSent();
-      printf("Sent a reply");
+      printf("Sent a reply\n");
       nrf_gpio_pin_set(LED);
     } else {
-      printf("Receive failed");
+      printf("Receive failed\n");
     }
   }
 }
@@ -729,7 +661,7 @@ static void gpio_init(void) {
     APP_ERROR_CHECK(err_code);
 
     nrf_drv_gpiote_in_config_t in_config = GPIOTE_CONFIG_IN_SENSE_TOGGLE(true);
-    in_config.pull = NRF_GPIO_PIN_PULLUP;
+    in_config.pull = NRF_GPIO_PIN_PULLDOWN;
 
     err_code = nrf_drv_gpiote_in_init(RFM95_INT, &in_config, handleInterrupts);
     APP_ERROR_CHECK(err_code);
@@ -771,7 +703,7 @@ int main(void) {
 
   nrf_gpio_pin_dir_set(RFM95_RST, NRF_GPIO_PIN_DIR_OUTPUT);
   nrf_gpio_pin_write(RFM95_RST, 1);
-  printf("Arduino LoRa RX Test!");
+  printf("Arduino LoRa RX Test!\n");
   // manual reset
   nrf_gpio_pin_write(RFM95_RST, 0);
   nrf_delay_ms(10);
@@ -779,7 +711,7 @@ int main(void) {
 
   nrf_delay_ms(10);
   while (!init()) {
-    printf("LoRa radio init failed");
+    printf("LoRa radio init failed\n");
     while (1);
   }
   printf("LoRa radio init OK!");
@@ -792,7 +724,6 @@ int main(void) {
   setTxPower(23, false);
 
   while (1) {
-    printf("sparkfun flash! \n");
     nrf_delay_ms(1000); 
     loop();
   }
