@@ -270,12 +270,6 @@ static uint8_t LED = NRF_GPIO_PIN_MAP(0,7);
 
 #define RH_RF95_FXOSC 32000000.0
 #define RH_RF95_FSTEP  (RH_RF95_FXOSC / 524288)
-#define RH_NRF51_HEADER_LEN 7
-
-// This is the maximum number of bytes that can be carried by the nRF51.
-// We use some for headers, keeping fewer for RadioHead messages
-#define RH_NRF51_MAX_PAYLOAD_LEN 254
-
 
 // Change to 434.0 or other frequency, must match RX's freq!
 #define RF95_FREQ 915.0
@@ -327,7 +321,7 @@ volatile uint16_t   _rxGood;
 uint8_t             _thisAddress;
 /// Count of the number of bad messages (eg bad checksum etc) received
 volatile uint16_t   _rxBad;
-uint8_t             _buf[RH_NRF51_MAX_PAYLOAD_LEN+1];
+uint8_t             _buf[RH_RF95_MAX_PAYLOAD_LEN+1];
 /// True when there is a valid message in the buffer
 volatile bool       _rxBufValid;
 
@@ -371,8 +365,7 @@ void setModeRx()
 
 // Check whether the latest received message is complete and uncorrupted
 void validateRxBuf() {
-  printf("validateRxBuf\n");
-  if (_buf[1] < RH_NRF51_HEADER_LEN)
+  if (_buf[1] < RH_RF95_HEADER_LEN)
     return; // Too short to be a real message
   // Extract the 4 headers following S0, LEN and S1
   _rxHeaderTo    = _buf[3];
@@ -389,7 +382,6 @@ void validateRxBuf() {
 //bool RH_RF95::available()
 bool available()
 {
-	printf("mode %d\n", _mode);
     if (_mode == RHModeTx)
       return false;
     setModeRx();
@@ -403,9 +395,9 @@ bool recv(uint8_t* buf, uint8_t* len) {
   if (buf && len) {
     // Skip the 4 headers that are at the beginning of the rxBuf
     // the payload length is the first octet in _buf
-    if (*len > _buf[1]-RH_NRF51_HEADER_LEN)
-      *len = _buf[1]-RH_NRF51_HEADER_LEN;
-    memcpy(buf, _buf+RH_NRF51_HEADER_LEN, *len);
+    if (*len > _buf[1]-RH_RF95_HEADER_LEN)
+      *len = _buf[1]-RH_RF95_HEADER_LEN;
+    memcpy(buf, _buf+RH_RF95_HEADER_LEN, *len);
   }
   clearRxBuf(); // This message accepted and cleared
   return true;
@@ -416,7 +408,6 @@ void spiBurstWrite(uint8_t reg, uint8_t* write_buf, size_t len){
   uint8_t buf[257];
   buf[0] = 0x80 | reg;
   memcpy(buf+1, write_buf, len);
-
   nrf_drv_spi_init(spi_instance, &spi_config, NULL, NULL);
   nrf_drv_spi_transfer(spi_instance, buf, len+1, NULL, 0);
   nrf_drv_spi_uninit(spi_instance);
@@ -433,6 +424,7 @@ void spiBurstRead(uint8_t reg, uint8_t* read_buf, size_t len){
   nrf_drv_spi_transfer(spi_instance, &readreg, 1, buf, len+1);
   nrf_drv_spi_uninit(spi_instance);
 
+  buf[len] = 0;
   memcpy(read_buf, buf+1, len);
 }
 
@@ -560,7 +552,6 @@ bool init() {
 
 
 void handleInterrupts(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action) {
-  printf("Interrupt \n");
   // Read the interrupt register
   uint8_t irq_flags = spiRead(RH_RF95_REG_12_IRQ_FLAGS);
   // Read the RegHopChannel register to check if CRC presence is signalled
@@ -648,21 +639,17 @@ bool waitAvailableTimeout(uint16_t timeout) {
 // }
 
 void loop() {
-  printf("in loop\n");
-
   if (available()) {
-    printf("available\n");
     // Should be a message for us now   
     uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
     uint8_t len = sizeof(buf);
-    buf[len - 1] = 0;
-    
+
     if (recv(buf, &len)) {
       nrf_gpio_pin_clear(LED);
-      printf("Got something\n");
-      printf("\n");
+      printf("Got something:");
+      printf("%s\n", buf);
       // Send a reply
-      uint8_t data[] = "And hello back to you\n";
+      uint8_t data[] = "And hello back to you";
       send(data, sizeof(data));
       waitPacketSent();
       printf("Sent a reply\n");

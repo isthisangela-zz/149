@@ -269,11 +269,6 @@
 
 #define RH_RF95_FXOSC 32000000.0
 #define RH_RF95_FSTEP  (RH_RF95_FXOSC / 524288)
-#define RH_NRF51_HEADER_LEN 7
-
-// This is the maximum number of bytes that can be carried by the nRF51.
-// We use some for headers, keeping fewer for RadioHead messages
-#define RH_NRF51_MAX_PAYLOAD_LEN 254
 
 
 // Change to 434.0 or other frequency, must match RX's freq!
@@ -326,7 +321,7 @@ volatile uint16_t   _rxGood;
 uint8_t             _thisAddress;
 /// Count of the number of bad messages (eg bad checksum etc) received
 volatile uint16_t   _rxBad;
-uint8_t             _buf[RH_NRF51_MAX_PAYLOAD_LEN+1];
+uint8_t             _buf[RH_RF95_MAX_PAYLOAD_LEN+1];
 /// True when there is a valid message in the buffer
 volatile bool       _rxBufValid;
 
@@ -369,7 +364,7 @@ void setModeRx()
 
 // Check whether the latest received message is complete and uncorrupted
 void validateRxBuf() {
-  if (_buf[1] < RH_NRF51_HEADER_LEN)
+  if (_buf[1] < RH_RF95_HEADER_LEN)
     return; // Too short to be a real message
   // Extract the 4 headers following S0, LEN and S1
   _rxHeaderTo    = _buf[3];
@@ -399,9 +394,9 @@ bool recv(uint8_t* buf, uint8_t* len) {
   if (buf && len) {
     // Skip the 4 headers that are at the beginning of the rxBuf
     // the payload length is the first octet in _buf
-    if (*len > _buf[1]-RH_NRF51_HEADER_LEN)
-      *len = _buf[1]-RH_NRF51_HEADER_LEN;
-    memcpy(buf, _buf+RH_NRF51_HEADER_LEN, *len);
+    if (*len > _buf[1]-RH_RF95_HEADER_LEN)
+      *len = _buf[1]-RH_RF95_HEADER_LEN;
+    memcpy(buf, _buf+RH_RF95_HEADER_LEN, *len);
   }
   clearRxBuf(); // This message accepted and cleared
   return true;
@@ -412,7 +407,6 @@ void spiBurstWrite(uint8_t reg, uint8_t* write_buf, size_t len){
   uint8_t buf[257];
   buf[0] = 0x80 | reg;
   memcpy(buf+1, write_buf, len);
-
   nrf_drv_spi_init(spi_instance, &spi_config, NULL, NULL);
   nrf_drv_spi_transfer(spi_instance, buf, len+1, NULL, 0);
   nrf_drv_spi_uninit(spi_instance);
@@ -585,7 +579,6 @@ bool send(const uint8_t* data, uint8_t len) {
 
   waitPacketSent(); // Make sure we dont interrupt an outgoing message
   setModeIdle();
-  printf("in send\n");
   // Position at the beginning of the FIFO
   spiWrite(RH_RF95_REG_0D_FIFO_ADDR_PTR, 0);
   // The headers
@@ -640,12 +633,11 @@ void loop() {
  
   printf("Waiting for reply...\n");
   nrf_delay_ms(500);
-  // if (waitAvailableTimeout(1000)) { 
-  if (true) {
+  if (waitAvailableTimeout(1000)) { 
     // Should be a reply message for us now   
     if (recv(buf, &len)) {
-      printf("Got reply\n");
-    }
+      printf("Got reply:");
+      printf("%s\n", buf);    }
     else {
       printf("Receive failed\n");
     }
