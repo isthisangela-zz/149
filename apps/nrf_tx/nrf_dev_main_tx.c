@@ -357,17 +357,14 @@ void setModeIdle() {
   }
 }
 
-void setModeRx() {
-  if (_mode != RHModeRx) {
-    setModeIdle(); // Can only start RX from DISABLE state
-
-    // Radio will transition automatically to Disable state when a message is received
-    NRF_RADIO->PACKETPTR = (uint32_t)_buf;
-    NRF_RADIO->EVENTS_READY = 0U;
-    NRF_RADIO->TASKS_RXEN = 1;
-    NRF_RADIO->EVENTS_END = 0U; // So we can detect end of reception
-    _mode = RHModeRx;
-  }
+void setModeRx()
+{
+    if (_mode != RHModeRx)
+    {
+  spiWrite(RH_RF95_REG_01_OP_MODE, RH_RF95_MODE_RXCONTINUOUS);
+  spiWrite(RH_RF95_REG_40_DIO_MAPPING1, 0x00); // Interrupt on RxDone
+  _mode = RHModeRx;
+    }
 }
 
 // Check whether the latest received message is complete and uncorrupted
@@ -547,7 +544,6 @@ void setPreambleLength(uint16_t bytes) {
 
 //bool RH_RF95::init()
 bool init() {
-
     spiWrite(RH_RF95_REG_01_OP_MODE, RH_RF95_MODE_SLEEP | RH_RF95_LONG_RANGE_MODE);
     nrf_delay_ms(10); // Wait for sleep mode to take over from say, CAD
     // Check we are in sleep mode, with LORA set
@@ -583,15 +579,13 @@ bool init() {
     return true;
 }
  
-int16_t packetnum = 0;  // packet counter, we increment per xmission
-
 bool send(const uint8_t* data, uint8_t len) {
   if (len > RH_RF95_MAX_MESSAGE_LEN)
     return false;
 
   waitPacketSent(); // Make sure we dont interrupt an outgoing message
   setModeIdle();
-
+  printf("in send\n");
   // Position at the beginning of the FIFO
   spiWrite(RH_RF95_REG_0D_FIFO_ADDR_PTR, 0);
   // The headers
@@ -600,8 +594,7 @@ bool send(const uint8_t* data, uint8_t len) {
   spiWrite(RH_RF95_REG_00_FIFO, _txHeaderId);
   spiWrite(RH_RF95_REG_00_FIFO, _txHeaderFlags);
   // The message data
-  uint8_t tdata = *data;
-  spiBurstWrite(RH_RF95_REG_00_FIFO, &tdata, len);
+  spiBurstWrite(RH_RF95_REG_00_FIFO, data, len);
   spiWrite(RH_RF95_REG_22_PAYLOAD_LENGTH, len + RH_RF95_HEADER_LEN);
 
   setModeTx(); // Start the transmitter
@@ -624,11 +617,13 @@ bool waitAvailableTimeout(uint16_t timeout) {
   return false;
 }
 
+int16_t packetnum = 0;  // packet counter, we increment per xmission
+
 void loop() {
   printf("Sending to rf95_server\n");
   // Send a message to rf95_server
   
-  char radiopacket[20] = "Hello World #      ";
+  char radiopacket[20] = "Bello World #      ";
   itoa(packetnum++, radiopacket+13, 10);
   radiopacket[19] = 0;
   
@@ -715,6 +710,8 @@ int main(void) {
   nrf_delay_ms(10);
   nrf_gpio_pin_write(RFM95_RST, 1);
   nrf_delay_ms(10);
+
+
   while (!init()) {
     printf("LoRa radio init failed\n");
     while (1);
