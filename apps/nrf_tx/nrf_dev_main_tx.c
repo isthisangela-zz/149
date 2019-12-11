@@ -239,6 +239,10 @@
 #define SPI_SCLK    NRF_GPIO_PIN_MAP(0,4)
 // Interrupt
 #define RFM95_INT   NRF_GPIO_PIN_MAP(0,3)
+// Button1 for turning on
+#define BUTTON_1    NRF_GPIO_PIN_MAP(0,13)
+// Button2 for turning off
+#define BUTTON_2    NRF_GPIO_PIN_MAP(0,14)
 
 
 #define RH_RF95_FIFO_SIZE 255
@@ -302,6 +306,7 @@ uint8_t _txHeaderId = 0;
 uint8_t _txHeaderTo = RH_BROADCAST_ADDRESS;
 uint8_t _txHeaderFrom = RH_BROADCAST_ADDRESS;
 bool _usingHFport = true;
+uint8_t flag = 0;
   
 /// Channel activity detected
 volatile bool       _cad;
@@ -382,7 +387,7 @@ void validateRxBuf() {
 bool available()
 {
     if (_mode == RHModeTx)
-  return false;
+  		return false;
     setModeRx();
     return _rxBufValid; // Will be set by the interrupt handler when a good message is received
 }
@@ -603,7 +608,8 @@ bool waitAvailableTimeout(uint16_t timeout) {
     nrf_delay_ms(200);
     printf("waiting... \n");
     if (available()) {
-      return true;
+    	printf("true\n");
+      	return true;
     }
     //pthread_yield();  
   }
@@ -632,7 +638,7 @@ void loop() {
   uint8_t len = sizeof(buf);
  
   printf("Waiting for reply...\n");
-  nrf_delay_ms(500);
+  //nrf_delay_ms(500);
   if (waitAvailableTimeout(1000)) { 
     // Should be a reply message for us now   
     if (recv(buf, &len)) {
@@ -645,7 +651,97 @@ void loop() {
   else {
     printf("No reply, is there a listener around?\n");
   }
-  nrf_delay_ms(1000);
+  //nrf_delay_ms(1000);
+}
+
+void loop_button_on() {
+  
+  	printf("Sending 'turn on' to rf95_server\n");
+  	// Send a message to rf95_server
+  
+  	char radiopacket[20] = "turn on     #";
+  	itoa(packetnum++, radiopacket+13, 10);
+  	radiopacket[19] = 0;
+  
+  	printf("Sending...\n");
+  	nrf_delay_ms(10);
+  	send((uint8_t *)radiopacket, 20);
+ 
+  	printf("Waiting for packet to complete...\n");
+  	nrf_delay_ms(10);
+  	waitPacketSent();
+  	// Now wait for a reply
+  	uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+  	uint8_t len = sizeof(buf);
+ 
+  	printf("Waiting for reply...\n");
+  	//nrf_delay_ms(500);
+  	if (waitAvailableTimeout(1000)) { 
+    	// Should be a reply message for us now   
+    	if (recv(buf, &len)) {
+      		printf("Got reply:");
+      		printf("%s\n", buf);   
+      		flag = 0;
+      		return;
+      	}
+    	else {
+      		printf("Receive failed\n");
+    	}
+  	}
+  	else {
+    	printf("No reply, is there a listener around?\n");
+  	}
+  	//nrf_delay_ms(1000);
+  
+}
+
+void loop_button_off() {
+  
+  	printf("Sending 'turn off' to rf95_server\n");
+  	// Send a message to rf95_server
+  
+  	char radiopacket[20] = "turn off     #";
+  	itoa(packetnum++, radiopacket+13, 10);
+  	radiopacket[19] = 0;
+  
+  	printf("Sending...\n");
+  	nrf_delay_ms(10);
+  	send((uint8_t *)radiopacket, 20);
+ 
+  	printf("Waiting for packet to complete...\n");
+  	nrf_delay_ms(10);
+  	waitPacketSent();
+  	// Now wait for a reply
+  	uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+  	uint8_t len = sizeof(buf);
+ 
+  	printf("Waiting for reply...\n");
+  	nrf_delay_ms(500);
+  	if (waitAvailableTimeout(1000)) { 
+    	// Should be a reply message for us now   
+    	if (recv(buf, &len)) {
+      		printf("Got reply:");
+      		printf("%s\n", buf);   
+      		flag = 0;
+      		return;
+      	}
+    	else {
+      		printf("Receive failed\n");
+    	}
+  	}
+  	else {
+    	printf("No reply, is there a listener around?\n");
+  	}
+  	//nrf_delay_ms(1000);
+  }
+
+
+void button_on() {
+	flag = 1;
+}
+
+void button_off() {
+	flag = 2;
 }
 
 static void gpio_init(void) {
@@ -654,13 +750,27 @@ static void gpio_init(void) {
     err_code = nrf_drv_gpiote_init();
     APP_ERROR_CHECK(err_code);
 
-    nrf_drv_gpiote_in_config_t in_config = GPIOTE_CONFIG_IN_SENSE_TOGGLE(true);
-    in_config.pull = NRF_GPIO_PIN_PULLUP;
+    nrf_drv_gpiote_in_config_t in_config_G0 = GPIOTE_CONFIG_IN_SENSE_LOTOHI(true);
+    in_config_G0.pull = NRF_GPIO_PIN_PULLUP;
 
-    err_code = nrf_drv_gpiote_in_init(RFM95_INT, &in_config, handleInterrupts);
+    err_code = nrf_drv_gpiote_in_init(RFM95_INT, &in_config_G0, handleInterrupts);
     APP_ERROR_CHECK(err_code);
 
+    nrf_drv_gpiote_in_config_t in_config_Button = GPIOTE_CONFIG_IN_SENSE_HITOLO(true);
+    in_config_Button.pull = NRF_GPIO_PIN_PULLUP;
+
+    err_code = nrf_drv_gpiote_in_init(BUTTON_1, &in_config_Button, button_on);
+    err_code = nrf_drv_gpiote_in_init(BUTTON_2, &in_config_Button, button_off);
+    APP_ERROR_CHECK(err_code);
+
+
+
+
+
     nrf_drv_gpiote_in_event_enable(RFM95_INT, true);
+    nrf_drv_gpiote_in_event_enable(BUTTON_1, true);
+    nrf_drv_gpiote_in_event_enable(BUTTON_2, true);
+
 }
 
 int main(void) {
@@ -721,7 +831,12 @@ int main(void) {
   setTxPower(23, false);
 
   while (1) {
-    loop();
+    if(flag == 1){
+    	loop_button_on();
+    }
+    if(flag == 2){
+    	loop_button_off();
+    }
   }
 }
 
