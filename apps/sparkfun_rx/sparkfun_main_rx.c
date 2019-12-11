@@ -267,6 +267,7 @@
 #define RH_RF95_REG_0E_FIFO_TX_BASE_ADDR                   0x0e
 #define RH_RF95_LONG_RANGE_MODE                       0x80
 static uint8_t LED = NRF_GPIO_PIN_MAP(0,7);
+static uint8_t SWITCH = NRF_GPIO_PIN_MAP(0,12);
 
 #define RH_RF95_FXOSC 32000000.0
 #define RH_RF95_FSTEP  (RH_RF95_FXOSC / 524288)
@@ -570,15 +571,14 @@ void handleInterrupts(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action) {
 
     // We have received a message.
     validateRxBuf(); 
-    if (_rxBufValid)
+    if (_rxBufValid) {
       setModeIdle(); // Got one 
+    }
   } else if (_mode == RHModeTx && irq_flags & RH_RF95_TX_DONE) {
     _txGood++;
     setModeIdle();
-  } else if (_mode == RHModeCad && irq_flags & RH_RF95_CAD_DONE) {
-    _cad = irq_flags & RH_RF95_CAD_DETECTED;
-    setModeIdle();
   }
+
     // Sigh: on some processors, for some unknown reason, doing this only once does not actually
     // clear the radio's interrupt flag. So we do it twice. Why?
     spiWrite(RH_RF95_REG_12_IRQ_FLAGS, 0xff); // Clear all IRQ flags
@@ -644,16 +644,34 @@ void loop() {
     uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
     uint8_t len = sizeof(buf);
 
+    uint8_t on[] = "turn on";
+    uint8_t off[] = "turn off";
+
+    uint8_t data[] = "And hello back to you";
+
     if (recv(buf, &len)) {
-      nrf_gpio_pin_clear(LED);
+
+      if (on[6] == buf[6]) {
+      	nrf_gpio_pin_clear(LED);
+      	nrf_gpio_pin_set(SWITCH);
+      	strcpy(data,"Turned on.");
+      }
+      if (off[6] == buf[6]) {
+      	nrf_gpio_pin_set(LED);
+      	nrf_gpio_pin_clear(SWITCH);
+      	strcpy(data,"Turned off.");
+      }
+
       printf("Got something:");
       printf("%s\n", buf);
+      printf("%s\n", data);
+
+      nrf_delay_ms(100);
+
       // Send a reply
-      uint8_t data[] = "And hello back to you";
       send(data, sizeof(data));
       waitPacketSent();
       printf("Sent a reply\n");
-      nrf_gpio_pin_set(LED);
     } else {
       printf("Receive failed\n");
     }
@@ -689,7 +707,11 @@ int main(void) {
   // manually-controlled (simple) output, initially set
   nrfx_gpiote_out_config_t out_config = NRFX_GPIOTE_CONFIG_OUT_SIMPLE(true);
   error_code = nrfx_gpiote_out_init(LED, &out_config);
+  error_code = nrfx_gpiote_out_init(SWITCH, &out_config);
   APP_ERROR_CHECK(error_code);
+
+  nrf_gpio_pin_set(LED);
+  nrf_gpio_pin_clear(SWITCH);
 
   spi_instance = &instance;
 
@@ -726,12 +748,11 @@ int main(void) {
     printf("setFrequency failed\n");
     while (1);
   }
-  printf("golly boy\n");
   setTxPower(23, false);
 
   while (1) {
-    nrf_delay_ms(1000); 
-    loop();
+  	loop();
+    nrf_delay_ms(1000);
   }
 }
 
