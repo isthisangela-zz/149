@@ -277,6 +277,7 @@ static uint8_t SWITCH = NRF_GPIO_PIN_MAP(0,12);
 #define RF95_FREQ 915.0
 
 
+
 typedef enum {
   RHModeInitialising = 0, ///< Transport is initialising. Initial default value until init() is called..
   RHModeSleep,            ///< Transport hardware is in low power sleep mode (if supported)
