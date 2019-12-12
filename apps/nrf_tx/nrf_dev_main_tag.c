@@ -778,6 +778,7 @@ void button_off() {
 }
 
 void location_ready() {
+	printf("interrupt\n");
   data_ready = 1;
 }
 
@@ -812,14 +813,57 @@ static void gpio_init(void) {
 
 }
 
+
 void update_message(uint8_t *msg, size_t msg_len) {
-	printf("length %d\n", msg_len);
+	
   for (size_t i = 0; i < msg_len; i++) {
-    printf("%x\n", msg[i]);
+    //printf("%x\n", msg[i]);
     msg[i] = msg[i] << 1;
-    printf("%x\n", msg[i]);
+    //printf("%x\n", msg[i]);
   }
 }
+
+void dwm_tag_init() {
+  // we want 11011111 
+  // uwb_mode active, fw_update_en, ble_en, led_en, reserved, loc-engine_en, low_power_en
+  uint8_t data[4];
+  data[0] = 0x05;
+  data[1] = 0x02;
+  data[2] = 0xDE;
+  data[3] = 0x00;
+  
+  update_message(data, 4);
+  nrf_drv_spi_init(spi_instance, &dwm_spi_config, NULL, NULL);
+  ret_code_t err_code = nrf_drv_spi_transfer(spi_instance, data, 4, NULL, 0);
+  APP_ERROR_CHECK(err_code);
+  if (err_code != NRF_SUCCESS) {
+    return NULL;  
+  }
+  nrf_delay_ms(1000);
+  uint8_t size_num[2];
+  err_code = nrf_drv_spi_transfer(spi_instance, NULL, 0, size_num, 2);
+  
+  while (size_num[0] == 0x00 ) {
+    APP_ERROR_CHECK(err_code);
+    if (err_code != NRF_SUCCESS) {
+      return NULL;
+    }
+    nrf_delay_ms(10);
+    err_code = nrf_drv_spi_transfer(spi_instance, NULL, 0, size_num, 2);
+  }
+  printf("%x %x\n", size_num[0], size_num[1]);
+  uint8_t* readData = (uint8_t *)malloc(sizeof(uint8_t)*size_num[0]);
+  err_code = nrf_drv_spi_transfer(spi_instance, NULL, 0, readData, size_num[0]);
+  APP_ERROR_CHECK(err_code);
+  if (err_code != NRF_SUCCESS) {
+    return NULL;
+  }
+  printf("%x %x %x\n", readData[0], readData[1], readData[2]);
+  nrf_drv_spi_uninit(spi_instance);
+  return;
+}
+
+
 
 
 int dwm_loc_get(dwm_loc_data_t* loc)
@@ -828,24 +872,45 @@ int dwm_loc_get(dwm_loc_data_t* loc)
    uint8_t rx_data[DWM1001_TLV_MAX_SIZE];
    uint16_t rx_len;
    uint8_t data_cnt, i, j;
-   uint8_t waittime = 5;
+   
    tx_data[tx_len++] = DWM1001_TLV_TYPE_CMD_LOC_GET;
-   tx_data[tx_len++] = 0;   
+   tx_data[tx_len++] = 0;
+   //update_message(tx_data, 2);  
    // LMH_Tx(tx_data, &tx_len);   
+   // initial spi
    nrf_drv_spi_init(spi_instance, &dwm_spi_config, NULL, NULL);
+   // send TLV request
    ret_code_t err = nrf_drv_spi_transfer(spi_instance, tx_data, tx_len, NULL, 0);
+   if (err != NRF_SUCCESS) {
+   	 return NULL;
+   }
 
-   err = nrf_drv_spi_transfer(spi_instance, NULL, 0, rx_data, DWM1001_TLV_MAX_SIZE);
-   rx_len = sizeof(rx_data)/sizeof(uint8_t);
-   while(rx_len <= 0 && waittime > 0){
-      err = nrf_drv_spi_transfer(spi_instance, NULL, 0, rx_data, DWM1001_TLV_MAX_SIZE);
-      rx_len = sizeof(rx_data)/sizeof(uint8_t);
-      waittime -= 1;
-      nrf_delay_ms(100);
+   // get (size per transmission, num_transitions)
+   uint8_t size_num[2];
+   err = nrf_drv_spi_transfer(spi_instance, NULL, 0, size_num, 2);
+   while(size_num[0] == 0x00) {
+    
+    if (err != NRF_SUCCESS) {
+      return NULL;
+    }
+    nrf_delay_ms(10);
+    err= nrf_drv_spi_transfer(spi_instance, NULL, 0, size_num, 2);
+   }
+   printf("%x %x\n", size_num[0], size_num[1]);
+
+   //reading data
+   err = nrf_drv_spi_transfer(spi_instance, NULL, 0, rx_data, size_num[0]);
+   rx_len = strlen(*rx_data);
+   if (err != NRF_SUCCESS) {
+   	return NULL;
    }
    
-   printf("rx_len: %d and rx_data: %x",rx_len, *rx_data);
-   printf("\n");
+   int k = 0;
+  	while (k < size_num[0]) {
+  		printf("%x ", rx_data[k++]);
+  	}
+  	printf("\n");
+  	nrf_delay_ms(1000);
 
    // if(LMH_WaitForRx(rx_data, &rx_len, DWM1001_TLV_MAX_SIZE) == RV_OK)
    if(err == NRF_SUCCESS)
@@ -1014,24 +1079,42 @@ int dwm_int_cfg_set(uint16_t value)
    uint8_t tx_data[DWM1001_TLV_MAX_SIZE], tx_len = 0;
    uint8_t rx_data[DWM1001_TLV_MAX_SIZE];
    uint16_t rx_len;
-   uint8_t waittime = 5;
    tx_data[tx_len++] = DWM1001_TLV_TYPE_CMD_INT_CFG_SET;
    tx_data[tx_len++] = 2;
    tx_data[tx_len++] = value & 0xff;    
    tx_data[tx_len++] = (value>>8) & 0xff;   
    //LMH_Tx(tx_data, &tx_len);   
    nrf_drv_spi_init(spi_instance, &dwm_spi_config, NULL, NULL);
+   update_message(tx_data, tx_len);
    ret_code_t err = nrf_drv_spi_transfer(spi_instance, tx_data, tx_len, NULL, 0);
+   if (err != NRF_SUCCESS) {
+      return NULL;
+    }
 
-   err = nrf_drv_spi_transfer(spi_instance, NULL, 0, rx_data, 3);
-   while(err != NRF_SUCCESS && waittime > 0){
-   	err = nrf_drv_spi_transfer(spi_instance, NULL, 0, rx_data, 3);
-   	waittime -= 1;
-   	nrf_delay_ms(100);
+   // get (size per transmission, num_transitions)
+   uint8_t size_num[2];
+   err = nrf_drv_spi_transfer(spi_instance, NULL, 0, size_num, 2);
+   while(size_num[0] == 0x00) {
+    
+    if (err != NRF_SUCCESS) {
+      return NULL;
+    }
+    nrf_delay_ms(10);
+    err= nrf_drv_spi_transfer(spi_instance, NULL, 0, size_num, 2);
+   }
+   printf("size: %x num: %x\n", size_num[0], size_num[1]);
+
+   //reading data
+   err = nrf_drv_spi_transfer(spi_instance, NULL, 0, rx_data, size_num[0]);
+   rx_len = strlen(*rx_data);
+   if (err != NRF_SUCCESS) {
+   	return NULL;
    }
    nrf_drv_spi_uninit(spi_instance);
+   return (rx_data[0] == 0x40);
+   
    //return LMH_WaitForRx(rx_data, &rx_len, 3);
-   return (err == NRF_SUCCESS);
+   //return (err == NRF_SUCCESS);
 }
 
 
@@ -1067,7 +1150,7 @@ void spi_les_test(void)
    
    // setup GPIO interrupt from "LOC_READY" event
    // HAL_Log("dwm_int_cfg_set(DWM1001_INTR_LOC_READY);\n");
-   dwm_int_cfg_set(DWM1001_INTR_LOC_READY);
+   
    // HAL_GPIO_SetupCb(HAL_GPIO_DRDY, HAL_GPIO_INT_EDGE_RISING, &gpio_cb);
    
    // setup encryption key for network
@@ -1135,6 +1218,7 @@ int main(void) {
   spi_config = config;
 
   dwm_spi_config = dwm_config;
+  
 
 
   nrf_gpio_pin_dir_set(RFM95_RST, NRF_GPIO_PIN_DIR_OUTPUT);
@@ -1166,9 +1250,13 @@ int main(void) {
   // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then 
   // you can set transmitter powers from 5 to 23 dBm:
   setTxPower(23, false);
+  //dwm_int_cfg_set(DWM1001_INTR_LOC_READY);
+  dwm_tag_init();
 
   while (1) {
-    spi_les_test();
+    //spi_les_test();
+  	get_loc();
+  	nrf_delay_ms(1000);
     if(flag == 1){
       loop_button_on();
     }
