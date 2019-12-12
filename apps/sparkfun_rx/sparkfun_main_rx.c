@@ -30,8 +30,6 @@
 #include "boards.h"
 
 
-
-
 // Register names (LoRa Mode, from table 85)
 #define RH_RF95_REG_00_FIFO                                0x00
 #define RH_RF95_REG_01_OP_MODE                             0x01
@@ -284,6 +282,7 @@ static uint8_t SWITCH = NRF_GPIO_PIN_MAP(0,12);
 
 
 
+
 typedef enum {
   RHModeInitialising = 0, ///< Transport is initialising. Initial default value until init() is called..
   RHModeSleep,            ///< Transport hardware is in low power sleep mode (if supported)
@@ -336,60 +335,10 @@ uint8_t             _buf[RH_RF95_MAX_PAYLOAD_LEN+1];
 /// True when there is a valid message in the buffer
 volatile bool       _rxBufValid;
 
-
 static nrf_drv_spi_t instance = NRF_DRV_SPI_INSTANCE(1);
 const nrf_drv_spi_t* spi_instance;
-#define OP_QUEUES_SIZE          3
-#define APP_TIMER_PRESCALER     NRF_SERIAL_APP_TIMER_PRESCALER
-
-static void sleep_handler(void)
-{
-    __WFE();
-    __SEV();
-    __WFE();
-}
-
-NRF_SERIAL_DRV_UART_CONFIG_DEF(m_uart0_drv_config,
-                      NRF_GPIO_PIN_MAP(0, 14), NRF_GPIO_PIN_MAP(0, 30),
-                      0, 0,
-                      NRF_UART_HWFC_ENABLED, NRF_UART_PARITY_EXCLUDED,
-                      NRF_UART_BAUDRATE_9600,
-                      UART_DEFAULT_CONFIG_IRQ_PRIORITY);
-
-#define SERIAL_FIFO_TX_SIZE 32
-#define SERIAL_FIFO_RX_SIZE 32
-
-NRF_SERIAL_QUEUES_DEF(serial_queues, SERIAL_FIFO_TX_SIZE, SERIAL_FIFO_RX_SIZE);
 
 
-#define SERIAL_BUFF_TX_SIZE 1
-#define SERIAL_BUFF_RX_SIZE 1
-
-NRF_SERIAL_BUFFERS_DEF(serial_buffs, SERIAL_BUFF_TX_SIZE, SERIAL_BUFF_RX_SIZE);
-
-NRF_SERIAL_CONFIG_DEF(serial_config, NRF_SERIAL_MODE_IRQ,
-                      &serial_queues, &serial_buffs, NULL, sleep_handler);
-
-
-NRF_SERIAL_UART_DEF(serial_uart, 0);
-
-
-void read_gps(){
-    size_t * tp = 0;
-
-    int len = 0;
-    memset(store, 0, 1000);
-    char c;
-
-    nrf_serial_read(&serial_uart, &c, sizeof(c), NULL, 1000);
-    store[len] = c;
-    while(c!='\n'){
-
-        nrf_serial_read(&serial_uart, &c, sizeof(c), NULL, 1000); 
-        store[++len] = c;
-    }
-    return;
-}
 
 void clearRxBuf() {
     _rxBufValid = false;
@@ -417,9 +366,9 @@ void setModeRx()
 {
     if (_mode != RHModeRx)
     {
-	spiWrite(RH_RF95_REG_01_OP_MODE, RH_RF95_MODE_RXCONTINUOUS);
-	spiWrite(RH_RF95_REG_40_DIO_MAPPING1, 0x00); // Interrupt on RxDone
-	_mode = RHModeRx;
+  spiWrite(RH_RF95_REG_01_OP_MODE, RH_RF95_MODE_RXCONTINUOUS);
+  spiWrite(RH_RF95_REG_40_DIO_MAPPING1, 0x00); // Interrupt on RxDone
+  _mode = RHModeRx;
     }
 }
 
@@ -551,9 +500,8 @@ bool setFrequency(float centre) {
 }
 
 bool waitPacketSent() {
-  while (_mode == RHModeTx)
-    ;
-    //pthread_yield(); // Wait for any previous transmit to finish
+  while (_mode == RHModeTx);
+  //pthread_yield(); // Wait for any previous transmit to finish
   return true;
 }
 
@@ -613,6 +561,7 @@ bool init() {
 
 void handleInterrupts(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action) {
   // Read the interrupt register
+  printf("interrupt\n");
   uint8_t irq_flags = spiRead(RH_RF95_REG_12_IRQ_FLAGS);
   // Read the RegHopChannel register to check if CRC presence is signalled
   // in the header. If not it might be a stray (noise) packet.*
@@ -711,14 +660,14 @@ void loop() {
     if (recv(buf, &len)) {
 
       if (on[6] == buf[6]) {
-      	nrf_gpio_pin_clear(LED);
-      	nrf_gpio_pin_set(SWITCH);
-      	strcpy(data,"Turned on.");
+        nrf_gpio_pin_clear(LED);
+        nrf_gpio_pin_set(SWITCH);
+        strcpy(data,"Turned on.");
       }
       if (off[6] == buf[6]) {
-      	nrf_gpio_pin_set(LED);
-      	nrf_gpio_pin_clear(SWITCH);
-      	strcpy(data,"Turned off.");
+        nrf_gpio_pin_set(LED);
+        nrf_gpio_pin_clear(SWITCH);
+        strcpy(data,"Turned off.");
       }
 
       printf("Got something:");
@@ -752,25 +701,74 @@ static void gpio_init(void) {
     nrf_drv_gpiote_in_event_enable(RFM95_INT, true);
 }
 
+//// GPS /////
+#define OP_QUEUES_SIZE          3
+#define APP_TIMER_PRESCALER     NRF_SERIAL_APP_TIMER_PRESCALER
+#define ENABLE NRF_GPIO_PIN_MAP(0,8)
+
+char store[1000];
+
+static void sleep_handler(void)
+{
+    __WFE();
+    __SEV();
+    __WFE();
+}
+
+NRF_SERIAL_DRV_UART_CONFIG_DEF(m_uart0_drv_config,
+                      NRF_GPIO_PIN_MAP(0, 14), NRF_GPIO_PIN_MAP(0, 30),
+                      0, 0,
+                      NRF_UART_HWFC_ENABLED, NRF_UART_PARITY_EXCLUDED,
+                      NRF_UART_BAUDRATE_9600,
+                      UART_DEFAULT_CONFIG_IRQ_PRIORITY);
+
+#define SERIAL_FIFO_TX_SIZE 32
+#define SERIAL_FIFO_RX_SIZE 32
+
+NRF_SERIAL_QUEUES_DEF(serial_queues, SERIAL_FIFO_TX_SIZE, SERIAL_FIFO_RX_SIZE);
+
+
+#define SERIAL_BUFF_TX_SIZE 1
+#define SERIAL_BUFF_RX_SIZE 1
+
+NRF_SERIAL_BUFFERS_DEF(serial_buffs, SERIAL_BUFF_TX_SIZE, SERIAL_BUFF_RX_SIZE);
+
+NRF_SERIAL_CONFIG_DEF(serial_config, NRF_SERIAL_MODE_IRQ,
+                      &serial_queues, &serial_buffs, NULL, sleep_handler);
+
+
+NRF_SERIAL_UART_DEF(serial_uart, 0);
+
+void read_gps(){
+    size_t * tp = 0;
+
+    int len = 0;
+    memset(store, 0, 1000);
+    char c;
+
+    nrf_serial_read(&serial_uart, &c, sizeof(c), NULL, 1000);
+    store[len] = c;
+    while(c!='\n'){
+
+        nrf_serial_read(&serial_uart, &c, sizeof(c), NULL, 1000); 
+        store[++len] = c;
+    }
+    return;
+}
+
+//// end of GPS /////
+
+
 int main(void) {
-    ret_code_t ret;
+    
 
-    size_t * p_written = 0;
+  ///////GPS///////
+  ret_code_t ret;
 
-    ret = nrf_drv_clock_init();
-    APP_ERROR_CHECK(ret);
-    //ret = nrf_drv_power_init(NULL);
-    APP_ERROR_CHECK(ret);
+  size_t * p_written = 0;
 
-    nrf_drv_clock_lfclk_request(NULL);
-    ret = app_timer_init();
-    APP_ERROR_CHECK(ret);
-
-    // // Initialize LEDs and buttons.
-    // bsp_board_init(BSP_INIT_LEDS | BSP_INIT_BUTTONS);
-
-    ret = nrf_serial_init(&serial_uart, &m_uart0_drv_config, &serial_config);
-    APP_ERROR_CHECK(ret);
+  
+  ///////////// end of GPS //////////////
 
   // initialize RTT library
   ret_code_t error_code = NRF_SUCCESS;
@@ -827,13 +825,30 @@ int main(void) {
     while (1);
   }
   setTxPower(23, false);
+  ret = nrf_drv_clock_init();
+  nrf_drv_clock_lfclk_request(NULL);
+  ret = nrf_serial_init(&serial_uart, &m_uart0_drv_config, &serial_config);
+    
+  app_timer_init();
 
   while (1) {
-  	loop();
+    loop();
+    // ret = nrf_drv_clock_init();
+    // nrf_drv_clock_lfclk_request(NULL);
+    
+    // ret = nrf_serial_init(&serial_uart, &m_uart0_drv_config, &serial_config);
+    
     read_gps();
     printf("%s", store);
-        
+
+    // ret = nrf_serial_uninit(&serial_uart);
+    // nrf_drv_clock_lfclk_release();
+    // nrf_drv_clock_uninit();
+    // app_timer_pause();
+    // app_timer_resume();
     //nrf_delay_ms(1000);
+
+
   }
 }
 
