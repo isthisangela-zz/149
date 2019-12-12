@@ -34,41 +34,43 @@
 #include "boards.h"
 
 #include "nrf_drv_uart.h"
+extern const nrf_serial_t * serial_ref;
 
-#define PMTK_Q_RELEASE "$PMTK605*31"              ///< ask for the release and version
-#define PMTK_SET_NMEA_OUTPUT_ALLDATA "$PMTK314,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0*28"  ///< turn on ALL THE DATA
 
-#define SERIAL_FIFO_TX_SIZE 32
-#define SERIAL_FIFO_RX_SIZE 32
+// #define PMTK_Q_RELEASE "$PMTK605*31"              ///< ask for the release and version
+// #define PMTK_SET_NMEA_OUTPUT_ALLDATA "$PMTK314,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0*28"  ///< turn on ALL THE DATA
+
+// #define SERIAL_FIFO_TX_SIZE 32
+// #define SERIAL_FIFO_RX_SIZE 32
 #define UART_RX NRF_GPIO_PIN_MAP(0, 14)
 
 #define UART_TX NRF_GPIO_PIN_MAP(0, 30)
 
-static void sleep_handler(void)
-{
-    __WFE();
-    __SEV();
-    __WFE();
-}
+// static void sleep_handler(void)
+// {
+//     __WFE();
+//     __SEV();
+//     __WFE();
+// }
 
 
-#define SERIAL_BUFF_TX_SIZE 1
-#define SERIAL_BUFF_RX_SIZE 1
-extern const nrf_serial_t * serial_ref;
-extern const nrf_serial_queues_t * serial_queue;
+// #define SERIAL_BUFF_TX_SIZE 1
+// #define SERIAL_BUFF_RX_SIZE 1
+// extern const nrf_serial_t * serial_ref;
+// extern const nrf_serial_queues_t * serial_queue;
 
-NRF_SERIAL_DRV_UART_CONFIG_DEF(m_uart0_drv_config,
-                      BUCKLER_UART_RX, BUCKLER_UART_TX,
-                      0, 0,
-                      NRF_UART_HWFC_DISABLED, NRF_UART_PARITY_EXCLUDED,
-                      NRF_UART_BAUDRATE_115200,
-                      UART_DEFAULT_CONFIG_IRQ_PRIORITY);
+// NRF_SERIAL_DRV_UART_CONFIG_DEF(m_uart0_drv_config,
+//                       BUCKLER_UART_RX, BUCKLER_UART_TX,
+//                       0, 0,
+//                       NRF_UART_HWFC_DISABLED, NRF_UART_PARITY_EXCLUDED,
+//                       NRF_UART_BAUDRATE_115200,
+//                       UART_DEFAULT_CONFIG_IRQ_PRIORITY);
 
 
-NRF_SERIAL_BUFFERS_DEF(serial_buffs, SERIAL_BUFF_TX_SIZE, SERIAL_BUFF_RX_SIZE);
+// NRF_SERIAL_BUFFERS_DEF(serial_buffs, SERIAL_BUFF_TX_SIZE, SERIAL_BUFF_RX_SIZE);
 
-NRF_SERIAL_CONFIG_DEF(serial_config, NRF_SERIAL_MODE_DMA,
-                      &serial_queue, &serial_buffs, NULL, NULL);
+// NRF_SERIAL_CONFIG_DEF(serial_config, NRF_SERIAL_MODE_DMA,
+//                       &serial_queue, &serial_buffs, NULL, NULL);
 
 
 bool is_GPGGA(char *str) {
@@ -121,8 +123,8 @@ int main(int argc, char const *argv[])
     NRF_LOG_DEFAULT_BACKENDS_INIT();
     printf("Log initialized!\n");
 
-    nrf_drv_clock_lfclk_request(NULL);
-    error_code = app_timer_init();
+    //nrf_drv_clock_lfclk_request(NULL);
+    //error_code = app_timer_init();
 
 
 	// config.baudrate = 2576384;
@@ -131,7 +133,7 @@ int main(int argc, char const *argv[])
 	// config.use_easy_dma = false;
 
 
-	error_code = nrf_serial_init(serial_ref, &m_uart0_drv_config, &serial_config);
+	//error_code = nrf_serial_init(serial_ref, &m_uart0_drv_config, &serial_config);
     printf("fault\n");
 
 	//nrf_drv_uart_init(&uart_instance, &config, nrf_uart_event_handler);	
@@ -167,11 +169,11 @@ int main(int argc, char const *argv[])
 
 	while (1) {
 
-		char c;
-        error_code = nrf_serial_read(serial_ref, &c, sizeof(c), NULL, 1000);
+		char header[10];
+        error_code = nrf_serial_read(serial_ref, header, sizeof(header), NULL, 1000);
    		printf("fault 1\n");
 
-        printf("char %c\n", c);
+        printf("data %s\n", header);
 	// 	memset(data, 0, 1000);
 	// 	err_code = nrf_drv_uart_init(&uart_instance, &config, NULL);
 	// 	nrf_drv_uart_rx_enable(&uart_instance);
