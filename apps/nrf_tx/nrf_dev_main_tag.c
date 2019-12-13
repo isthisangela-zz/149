@@ -823,7 +823,7 @@ void update_message(uint8_t *msg, size_t msg_len) {
   }
 }
 
-void dwm_tag_init() {
+uint8_t* dwm_tag_init() {
   // we want 11011111 
   // uwb_mode active, fw_update_en, ble_en, led_en, reserved, loc-engine_en, low_power_en
   uint8_t data[4];
@@ -834,12 +834,17 @@ void dwm_tag_init() {
   
   update_message(data, 4);
   nrf_drv_spi_init(spi_instance, &dwm_spi_config, NULL, NULL);
+
+  // get state
+  // uint8_t state[1];
+  // ret_code_t err_code = nrf_drv_spi_transfer(spi_instance, NULL, 0, state,1);
+  // printf("now is: %x", state[0]); 
   ret_code_t err_code = nrf_drv_spi_transfer(spi_instance, data, 4, NULL, 0);
   APP_ERROR_CHECK(err_code);
   if (err_code != NRF_SUCCESS) {
     return NULL;  
   }
-  nrf_delay_ms(1000);
+  
   uint8_t size_num[2];
   err_code = nrf_drv_spi_transfer(spi_instance, NULL, 0, size_num, 2);
   
@@ -860,7 +865,7 @@ void dwm_tag_init() {
   }
   printf("%x %x %x\n", readData[0], readData[1], readData[2]);
   nrf_drv_spi_uninit(spi_instance);
-  return;
+  return readData;
 }
 
 
@@ -1251,7 +1256,12 @@ int main(void) {
   // you can set transmitter powers from 5 to 23 dBm:
   setTxPower(23, false);
   //dwm_int_cfg_set(DWM1001_INTR_LOC_READY);
-  dwm_tag_init();
+  uint8_t* readData = dwm_tag_init();
+  while (readData[0] != 0x40 || readData[2] != 0x00) {
+    printf("Config errored!");
+    free(readData);
+    readData = dwm_tag_init();
+  }
 
   while (1) {
     //spi_les_test();
