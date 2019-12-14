@@ -73,16 +73,14 @@ char store[1000];
 static void sleep_handler(void)
 {
     __WFE();
-    __SEV();
-    __WFE();
 }
 
 NRF_SERIAL_DRV_UART_CONFIG_DEF(m_uart0_drv_config,
-                      NRF_GPIO_PIN_MAP(0, 14), NRF_GPIO_PIN_MAP(0, 30),
+                      NRF_GPIO_PIN_MAP(0, 14), NRF_GPIO_PIN_MAP(0, 13),
                       0, 0,
                       NRF_UART_HWFC_ENABLED, NRF_UART_PARITY_EXCLUDED,
                       NRF_UART_BAUDRATE_9600,
-                      UART_DEFAULT_CONFIG_IRQ_PRIORITY);
+                      2);
 
 #define SERIAL_FIFO_TX_SIZE 32
 #define SERIAL_FIFO_RX_SIZE 32
@@ -95,32 +93,11 @@ NRF_SERIAL_QUEUES_DEF(serial_queues, SERIAL_FIFO_TX_SIZE, SERIAL_FIFO_RX_SIZE);
 
 NRF_SERIAL_BUFFERS_DEF(serial_buffs, SERIAL_BUFF_TX_SIZE, SERIAL_BUFF_RX_SIZE);
 
-NRF_SERIAL_CONFIG_DEF(serial_config, NRF_SERIAL_MODE_IRQ,
+NRF_SERIAL_CONFIG_DEF(serial_config, NRF_SERIAL_MODE_POLLING,
                       &serial_queues, &serial_buffs, NULL, sleep_handler);
 
 
 NRF_SERIAL_UART_DEF(serial_uart, 0);
-
-void read_gps(){
-    size_t * tp = 0;
-
-    int len = 0;
-    memset(store, 0, 1000);
-    char c;
-
-    nrf_serial_read(&serial_uart, &c, sizeof(c), NULL, 1000);
-    store[len] = c;
-    while(c!='\n'){
-
-        nrf_serial_read(&serial_uart, &c, sizeof(c), NULL, 1000); 
-        store[++len] = c;
-    }
-    return;
-}
-
-
-
-
 
 
 int main(void)
@@ -132,7 +109,7 @@ int main(void)
     ret = nrf_drv_clock_init();
     APP_ERROR_CHECK(ret);
     //ret = nrf_drv_power_init(NULL);
-    APP_ERROR_CHECK(ret);
+    //APP_ERROR_CHECK(ret);
 
     nrf_drv_clock_lfclk_request(NULL);
     ret = app_timer_init();
@@ -142,6 +119,7 @@ int main(void)
     // bsp_board_init(BSP_INIT_LEDS | BSP_INIT_BUTTONS);
 
     ret = nrf_serial_init(&serial_uart, &m_uart0_drv_config, &serial_config);
+    printf("Initialized\n");
     APP_ERROR_CHECK(ret);
 
     // static char tx_message[] = "Hello nrf_serial!\n\r";
@@ -153,14 +131,52 @@ int main(void)
     //                        NRF_SERIAL_MAX_TIMEOUT);
     // APP_ERROR_CHECK(ret);
 
-    while (true)
-    {
-        read_gps();
-        printf("%s", store);
-        //printf("%c", '0');
+    int i = 0;
+    while (true) {
+        size_t * tp = 0;
 
-        //(void)nrf_serial_write(&serial_uart, &c, sizeof(c), NULL, 0);
-        //(void)nrf_serial_flush(&serial_uart, 0);
+        int len = 0;
+        memset(store, 0, 1000);
+        char c;
+
+        //printf("frozen?\n");
+        ret = nrf_serial_read(&serial_uart, &c, sizeof(c), NULL, 1000);
+        printf("%x\n", ret);
+        //printf("frozen\n");
+        store[len] = c;
+
+        while(c!='\n'){
+            ret = nrf_serial_read(&serial_uart, &c, sizeof(c), NULL, 1000); 
+            if (ret != 0)
+                break;
+            //printf("%u\n", ret);
+            store[++len] = c;
+            //printf("%s\n", c);
+        }
+
+        printf("%s", store);
+
+        // if (i++ > 2) {
+        //     printf("counter %d\n", i);
+        nrf_delay_ms(1000);
+
+        ret = nrf_serial_uninit(&serial_uart);
+        printf("Uninitialized: %x\n", ret);
+        ret = nrf_serial_init(&serial_uart, &m_uart0_drv_config, &serial_config);
+        printf("Initialized: %x\n", ret);
+
+        //     printf("delaying\n");
+
+        //     // ret = nrf_drv_clock_init();
+        //     // nrf_drv_clock_lfclk_request(NULL);
+        //     // ret = app_timer_init();
+        //     // ret = nrf_serial_init(&serial_uart, &m_uart0_drv_config, &serial_config);
+        //     // printf("Initialized\n");
+        // }
+            //printf("%c", '0');
+
+            //(void)nrf_serial_write(&serial_uart, &c, sizeof(c), NULL, 0);
+            //(void)nrf_serial_flush(&serial_uart, 0);
 
     }
 }
