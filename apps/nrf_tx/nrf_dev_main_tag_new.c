@@ -1485,7 +1485,7 @@ int main(void) {
 
   while (1) {
     //spi_les_test();
-  	get_loc();
+  	//get_loc();
   	//nrf_delay_ms(1000);
 
     if(flag != 0){
