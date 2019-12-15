@@ -20,10 +20,10 @@
 
 #include "buckler.h"
 
-#define DWM_CS   NRF_GPIO_PIN_MAP(0,18)
-#define DWM_SCLK NRF_GPIO_PIN_MAP(0,17)
-#define DWM_MOSI NRF_GPIO_PIN_MAP(0,16)
-#define DWM_MISO NRF_GPIO_PIN_MAP(0,15)
+#define DWM_CS   NRF_GPIO_PIN_MAP(0,27)
+#define DWM_SCLK NRF_GPIO_PIN_MAP(0,26)
+#define DWM_MOSI NRF_GPIO_PIN_MAP(0,2)
+#define DWM_MISO NRF_GPIO_PIN_MAP(0,25)
 
 nrf_drv_spi_t spi_instance = NRF_DRV_SPI_INSTANCE(1);
 
@@ -196,10 +196,6 @@ int dwm_loc_get(dwm_loc_data_t* loc, uint8_t* rx_data, uint16_t rx_len)
 }
 
 
-
-
-
-
 int main(void) {
     ret_code_t error_code = NRF_SUCCESS;
 
@@ -216,7 +212,7 @@ int main(void) {
         .ss_pin = DWM_CS,
         .irq_priority = NRFX_SPI_DEFAULT_CONFIG_IRQ_PRIORITY,
         .orc = 0,
-        .frequency = NRF_DRV_SPI_FREQ_4M,
+        .frequency = NRF_DRV_SPI_FREQ_1M,
         .mode = NRF_DRV_SPI_MODE_0,
         .bit_order = NRF_DRV_SPI_BIT_ORDER_MSB_FIRST
     };
@@ -227,72 +223,8 @@ int main(void) {
     uint8_t reset_buf[1];
     reset_buf[0] = 0xff;
 
-    uint8_t tx_buf[4];
-    tx_buf[0] = 0x28;
-    tx_buf[1] = 0x02;
-    tx_buf[2] = 0x0D;
-    tx_buf[3] = 0x01;
-
-    uint8_t rx_buf[3];
-    rx_buf[0] = 0;
-    rx_buf[1] = 0;
-    rx_buf[2] = 0;
-
-    ret_code_t err_code = nrf_drv_spi_transfer(&spi_instance, reset_buf, 1, NULL, 0);
-    APP_ERROR_CHECK(err_code);
-    err_code = nrf_drv_spi_transfer(&spi_instance, reset_buf, 1, NULL, 0);
-    APP_ERROR_CHECK(err_code);
-    err_code = nrf_drv_spi_transfer(&spi_instance, reset_buf, 1, NULL, 0);
-    APP_ERROR_CHECK(err_code);
-
-    printf("reset\n");
-    while (rx_buf[0] == 0 && rx_buf[1] == 0) {
-        err_code = nrf_drv_spi_transfer(&spi_instance, NULL, 0, rx_buf, 2);
-        APP_ERROR_CHECK(err_code);
-        if (err_code != NRF_SUCCESS) {
-            printf("continuing spi error code: %d\n", (int) err_code);
-        }
-        else {
-            printf("rx_buf: %x %x %x\n", rx_buf[0], rx_buf[1], rx_buf[2]);
-        }
-        nrf_delay_ms(100);
-    }
-
-    nrf_delay_ms(100);
-
-    printf("Trying to send command\n");
-    err_code = nrf_drv_spi_transfer(&spi_instance, tx_buf, 4, NULL, 0);
-    APP_ERROR_CHECK(err_code);
-    err_code = nrf_drv_spi_transfer(&spi_instance, NULL, 0, rx_buf, 2);
-    APP_ERROR_CHECK(err_code);
-    if (err_code != NRF_SUCCESS) {
-        printf("spi error code: %d\n", (int) err_code);
-    }
-
-    while (rx_buf[0] == 0 && rx_buf[1] == 0) {
-        err_code = nrf_drv_spi_transfer(&spi_instance, NULL, 0, rx_buf, 2);
-        APP_ERROR_CHECK(err_code);
-        if (err_code != NRF_SUCCESS) {
-            printf("continuing spi error code: %d\n", (int) err_code);
-        }
-        else {
-            printf("rx_buf: %x %x %x\n", rx_buf[0], rx_buf[1], rx_buf[2]);
-        }
-    }
-
-    printf("received: %x %x\n", rx_buf[0], rx_buf[1]);
-
-    while (rx_buf[0] == 0 || rx_buf[0] == 0xff) {
-        err_code = nrf_drv_spi_transfer(&spi_instance, NULL, 0, rx_buf, 3);
-        APP_ERROR_CHECK(err_code);
-        if (err_code != NRF_SUCCESS) {
-            printf("continuing spi error code: %d\n", (int) err_code);
-        }
-        else {
-            printf("rx_buf: %x %x %x\n", rx_buf[0], rx_buf[1], rx_buf[2]);
-        }
-    }
-
+     ret_code_t err_code = nrf_drv_spi_transfer(&spi_instance, reset_buf, 1, NULL, 0);
+  
     // loop forever, running state machine
     while (1) {
 
@@ -353,7 +285,6 @@ int main(void) {
 
     		if (error_code != 0 )
 	    		printf("err_code %d\n", error_code);
-
 
 	        for(int i=0;i<num;i++){
 	            printf("%x ",rx_data[i]);

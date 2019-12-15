@@ -753,6 +753,7 @@ static void gpio_init(void) {
 }
 
 int main(void) {
+
     ret_code_t ret;
 
     size_t * p_written = 0;
@@ -766,74 +767,71 @@ int main(void) {
     ret = app_timer_init();
     APP_ERROR_CHECK(ret);
 
-    // // Initialize LEDs and buttons.
-    // bsp_board_init(BSP_INIT_LEDS | BSP_INIT_BUTTONS);
-
     ret = nrf_serial_init(&serial_uart, &m_uart0_drv_config, &serial_config);
     APP_ERROR_CHECK(ret);
 
-  // initialize RTT library
-  ret_code_t error_code = NRF_SUCCESS;
-  error_code = NRF_LOG_INIT(NULL);
-  APP_ERROR_CHECK(error_code);
-  NRF_LOG_DEFAULT_BACKENDS_INIT();
-  printf("Log initialized!\n");
+	// initialize RTT library
+	ret_code_t error_code = NRF_SUCCESS;
+	error_code = NRF_LOG_INIT(NULL);
+	APP_ERROR_CHECK(error_code);
+	NRF_LOG_DEFAULT_BACKENDS_INIT();
+	printf("Log initialized!\n");
 
-  // initialize GPIO driver/interrupts
-  gpio_init();
+	// initialize GPIO driver/interrupts
+	gpio_init();
 
-  // manually-controlled (simple) output, initially set
-  nrfx_gpiote_out_config_t out_config = NRFX_GPIOTE_CONFIG_OUT_SIMPLE(true);
-  error_code = nrfx_gpiote_out_init(LED, &out_config);
-  error_code = nrfx_gpiote_out_init(SWITCH, &out_config);
-  APP_ERROR_CHECK(error_code);
+	// manually-controlled (simple) output, initially set
+	nrfx_gpiote_out_config_t out_config = NRFX_GPIOTE_CONFIG_OUT_SIMPLE(true);
+	error_code = nrfx_gpiote_out_init(LED, &out_config);
+	error_code = nrfx_gpiote_out_init(SWITCH, &out_config);
+	APP_ERROR_CHECK(error_code);
 
-  nrf_gpio_pin_set(LED);
-  nrf_gpio_pin_clear(SWITCH);
+	nrf_gpio_pin_set(LED);
+	nrf_gpio_pin_clear(SWITCH);
 
-  spi_instance = &instance;
+	spi_instance = &instance;
 
-  nrf_drv_spi_config_t config = {
-    .sck_pin = SPI_SCLK,
-    .mosi_pin = SPI_MOSI,
-    .miso_pin = SPI_MISO,
-    .ss_pin = RFM95_CS,
-    .irq_priority = NRFX_SPI_DEFAULT_CONFIG_IRQ_PRIORITY,
-    .orc = 0,
-    .frequency = NRF_DRV_SPI_FREQ_1M,
-    .mode = 0,
-    .bit_order = 0
-  };
+	nrf_drv_spi_config_t config = {
+		.sck_pin = SPI_SCLK,
+		.mosi_pin = SPI_MOSI,
+		.miso_pin = SPI_MISO,
+		.ss_pin = RFM95_CS,
+		.irq_priority = NRFX_SPI_DEFAULT_CONFIG_IRQ_PRIORITY,
+		.orc = 0,
+		.frequency = NRF_DRV_SPI_FREQ_1M,
+		.mode = 0,
+		.bit_order = 0
+	};
 
-  spi_config = config;
+	spi_config = config;
 
-  nrf_gpio_pin_dir_set(RFM95_RST, NRF_GPIO_PIN_DIR_OUTPUT);
-  nrf_gpio_pin_write(RFM95_RST, 1);
-  printf("Arduino LoRa RX Test!\n");
-  // manual reset
-  nrf_gpio_pin_write(RFM95_RST, 0);
-  nrf_delay_ms(10);
-  nrf_gpio_pin_write(RFM95_RST, 1);
+	nrf_gpio_pin_dir_set(RFM95_RST, NRF_GPIO_PIN_DIR_OUTPUT);
+	nrf_gpio_pin_write(RFM95_RST, 1);
+	printf("Arduino LoRa RX Test!\n");
+	// manual reset
+	nrf_gpio_pin_write(RFM95_RST, 0);
+	nrf_delay_ms(10);
+	nrf_gpio_pin_write(RFM95_RST, 1);
 
-  nrf_delay_ms(10);
-  while (!init()) {
-    printf("LoRa radio init failed\n");
-    while (1);
-  }
-  printf("LoRa radio init OK!\n");
+	nrf_delay_ms(10);
+	while (!init()) {
+		printf("LoRa radio init failed\n");
+		while (1);
+	}
+	printf("LoRa radio init OK!\n");
 
-  if (!setFrequency(RF95_FREQ)) {
-    printf("setFrequency failed\n");
-    while (1);
-  }
-  setTxPower(23, false);
+	if (!setFrequency(RF95_FREQ)) {
+		printf("setFrequency failed\n");
+		while (1);
+	}
+	setTxPower(23, false);
 
-  while (1) {
-    loop();
-    read_gps();
-    printf("%s", store);
-        
-    //nrf_delay_ms(1000);
-  }
+	while (1) {
+		loop();
+		read_gps();
+		printf("%s", store);
+
+		//nrf_delay_ms(1000);
+	}
 }
 
