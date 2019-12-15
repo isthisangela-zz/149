@@ -1,0 +1,5 @@
+r
+loadfile _build/nrf_tag_sdk15_s132.hex 
+r
+g
+exit

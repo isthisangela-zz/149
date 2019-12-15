@@ -1,4 +1,4 @@
-// LoRa 9x_RX
+ // LoRa 9x_RX
 // Example sketch showing how to create a simple messaging client (receiver)
 // with the RH_RF95 class. RH_RF95 class does not provide for addressing or
 // reliability, so you should only use RH_RF95 if you do not need the higher
@@ -12,6 +12,9 @@
 #include <pthread.h>
 #include <time.h>
 
+#include "dwm_api.h"
+#include "test_util.h"
+#include "nrf_drv_gpiote.h"
 #include "app_error.h"
 #include "app_timer.h"
 #include "nrf.h"
@@ -22,14 +25,6 @@
 #include "nrf_log_default_backends.h"
 #include "nrf_pwr_mgmt.h"
 #include "nrf_drv_spi.h"
-#include "nrf_drv_gpiote.h"
-#include "nrf_drv_clock.h"
-#include "nrf_drv_power.h"
-#include "nrf_serial.h"
-#include "app_util.h"
-#include "boards.h"
-
-
 
 
 // Register names (LoRa Mode, from table 85)
@@ -235,18 +230,36 @@
 // SPI
 // LoRa Module pin connections
 // Reset
-#define RFM95_RST   NRF_GPIO_PIN_MAP(0,15)
+#define RFM95_RST   NRF_GPIO_PIN_MAP(0,31)
 // Slave/chip select
-#define RFM95_CS    NRF_GPIO_PIN_MAP(0,5)
+#define RFM95_CS    NRF_GPIO_PIN_MAP(0,30)
 // Master out, slave in
-#define SPI_MOSI    NRF_GPIO_PIN_MAP(0,4)
+#define SPI_MOSI    NRF_GPIO_PIN_MAP(0,29)
 // Master in, slave out
-#define SPI_MISO    NRF_GPIO_PIN_MAP(0,3)
+#define SPI_MISO    NRF_GPIO_PIN_MAP(0,28)
 // Clock
-#define SPI_SCLK    NRF_GPIO_PIN_MAP(0,2)
+#define SPI_SCLK    NRF_GPIO_PIN_MAP(0,4)
 // Interrupt
-#define RFM95_INT   NRF_GPIO_PIN_MAP(0,1)
+#define RFM95_INT   NRF_GPIO_PIN_MAP(0,3)
+// Button1 for turning on
+#define BUTTON_1    NRF_GPIO_PIN_MAP(0,13)
+// Button2 for turning off
+#define BUTTON_2    NRF_GPIO_PIN_MAP(0,14)
 
+// SPI
+// DWM Module pin connections
+// Reset
+#define DWM_RST     NRF_GPIO_PIN_MAP(0,27)
+// Slave/chip select
+#define DWM_CS      NRF_GPIO_PIN_MAP(0,26)
+// Master out, slave in
+#define DWM_MOSI    NRF_GPIO_PIN_MAP(0,25)
+// Master in, slave out
+#define DWM_MISO    NRF_GPIO_PIN_MAP(0,24)
+// Clock
+#define DWM_SCLK    NRF_GPIO_PIN_MAP(0,2)
+// Interrupt
+#define DWM_INT     NRF_GPIO_PIN_MAP(0,23) 
 
 
 #define RH_RF95_FIFO_SIZE 255
@@ -273,15 +286,23 @@
 #define RH_RF95_REG_06_FRF_MSB                             0x06
 #define RH_RF95_REG_0E_FIFO_TX_BASE_ADDR                   0x0e
 #define RH_RF95_LONG_RANGE_MODE                       0x80
-static uint8_t LED = NRF_GPIO_PIN_MAP(0,7);
-static uint8_t SWITCH = NRF_GPIO_PIN_MAP(0,12);
+
 
 #define RH_RF95_FXOSC 32000000.0
 #define RH_RF95_FSTEP  (RH_RF95_FXOSC / 524288)
 
+
 // Change to 434.0 or other frequency, must match RX's freq!
 #define RF95_FREQ 915.0
 
+//DWM
+#define RESP_ERRNO_LEN           3
+#define RESP_DAT_TYPE_OFFSET     RESP_ERRNO_LEN
+#define RESP_DAT_LEN_OFFSET      RESP_DAT_TYPE_OFFSET+1
+#define RESP_DAT_VALUE_OFFSET    RESP_DAT_LEN_OFFSET+1
+#define RESP_DATA_LOC_LOC_SIZE     15
+#define RESP_DATA_LOC_DIST_OFFSET  RESP_DAT_TYPE_OFFSET + RESP_DATA_LOC_LOC_SIZE
+#define RESP_DATA_LOC_DIST_LEN_MIN 3
 
 
 typedef enum {
@@ -299,10 +320,9 @@ typedef enum {
   DataRate250kbps      ///< 250 kbps
 } DataRate;
 
-char store[1000];
-
 volatile RHMode     _mode;
 nrf_drv_spi_config_t spi_config;
+nrf_drv_spi_config_t dwm_spi_config;
 uint8_t _txHeaderFlags = 0;
 volatile uint16_t   _txGood;
 volatile uint8_t    _bufLen;
@@ -313,6 +333,7 @@ uint8_t _txHeaderId = 0;
 uint8_t _txHeaderTo = RH_BROADCAST_ADDRESS;
 uint8_t _txHeaderFrom = RH_BROADCAST_ADDRESS;
 bool _usingHFport = true;
+uint8_t flag = 0;
   
 /// Channel activity detected
 volatile bool       _cad;
@@ -338,58 +359,14 @@ volatile bool       _rxBufValid;
 
 
 static nrf_drv_spi_t instance = NRF_DRV_SPI_INSTANCE(1);
-const nrf_drv_spi_t* spi_instance;
-#define OP_QUEUES_SIZE          3
-#define APP_TIMER_PRESCALER     NRF_SERIAL_APP_TIMER_PRESCALER
+static const nrf_drv_spi_t* spi_instance;
 
-static void sleep_handler(void)
-{
-    __WFE();
-    __SEV();
-    __WFE();
-}
+//for dwm
+struct timeval tv;
+uint64_t ts_curr = 0;
+uint64_t ts_last = 0;
+volatile uint8_t data_ready;
 
-NRF_SERIAL_DRV_UART_CONFIG_DEF(m_uart0_drv_config,
-                      NRF_GPIO_PIN_MAP(0, 14), NRF_GPIO_PIN_MAP(0, 30),
-                      0, 0,
-                      NRF_UART_HWFC_ENABLED, NRF_UART_PARITY_EXCLUDED,
-                      NRF_UART_BAUDRATE_9600,
-                      UART_DEFAULT_CONFIG_IRQ_PRIORITY);
-
-#define SERIAL_FIFO_TX_SIZE 32
-#define SERIAL_FIFO_RX_SIZE 32
-
-NRF_SERIAL_QUEUES_DEF(serial_queues, SERIAL_FIFO_TX_SIZE, SERIAL_FIFO_RX_SIZE);
-
-
-#define SERIAL_BUFF_TX_SIZE 1
-#define SERIAL_BUFF_RX_SIZE 1
-
-NRF_SERIAL_BUFFERS_DEF(serial_buffs, SERIAL_BUFF_TX_SIZE, SERIAL_BUFF_RX_SIZE);
-
-NRF_SERIAL_CONFIG_DEF(serial_config, NRF_SERIAL_MODE_IRQ,
-                      &serial_queues, &serial_buffs, NULL, sleep_handler);
-
-
-NRF_SERIAL_UART_DEF(serial_uart, 0);
-
-
-void read_gps(){
-    size_t * tp = 0;
-
-    int len = 0;
-    memset(store, 0, 1000);
-    char c;
-
-    nrf_serial_read(&serial_uart, &c, sizeof(c), NULL, 1000);
-    store[len] = c;
-    while(c!='\n'){
-
-        nrf_serial_read(&serial_uart, &c, sizeof(c), NULL, 1000); 
-        store[++len] = c;
-    }
-    return;
-}
 
 void clearRxBuf() {
     _rxBufValid = false;
@@ -484,7 +461,6 @@ void spiBurstRead(uint8_t reg, uint8_t* read_buf, size_t len){
   nrf_drv_spi_transfer(spi_instance, &readreg, 1, buf, len+1);
   nrf_drv_spi_uninit(spi_instance);
 
-  buf[len] = 0;
   memcpy(read_buf, buf+1, len);
 }
 
@@ -557,59 +533,6 @@ bool waitPacketSent() {
   return true;
 }
 
-void setPreambleLength(uint16_t bytes) {
-    spiWrite(RH_RF95_REG_20_PREAMBLE_MSB, bytes >> 8);
-    spiWrite(RH_RF95_REG_21_PREAMBLE_LSB, bytes & 0xff);
-}
-
-//bool RH_RF95::init()
-bool init() {
-
-  nrf_gpio_pin_dir_set(RFM95_CS, NRF_GPIO_PIN_DIR_OUTPUT);
-  nrf_gpio_pin_write(RFM95_CS, 1);
-   // Set sleep mode, so we can also set LORA mode:
-
-  spiWrite(RH_RF95_REG_01_OP_MODE, RH_RF95_MODE_SLEEP | RH_RF95_LONG_RANGE_MODE);
-
-  nrf_delay_ms(10); // Wait for sleep mode to take over from say, CAD
-  // Check we are in sleep mode, with LORA set
-
-  if (spiRead(RH_RF95_REG_01_OP_MODE) != (RH_RF95_MODE_SLEEP | RH_RF95_LONG_RANGE_MODE)) {
-    printf("(RH_RF95_MODE_SLEEP | RH_RF95_LONG_RANGE_MODE): %x\n", (RH_RF95_MODE_SLEEP | RH_RF95_LONG_RANGE_MODE));
-    printf("RH_RF95_REG_01_OP_MODE: %x\n", RH_RF95_REG_01_OP_MODE);
-    return false; // No device present?
-  }
-  // Set up FIFO
-  // We configure so that we can use the entire 256 byte FIFO for either receive
-  // or transmit, but not both at the same time
-  spiWrite(RH_RF95_REG_0E_FIFO_TX_BASE_ADDR, 0);
-  spiWrite(RH_RF95_REG_0F_FIFO_RX_BASE_ADDR, 0);
-
-  // Packet format is preamble + explicit-header + payload + crc
-  // Explicit Header Mode
-  // payload is TO + FROM + ID + FLAGS + message data
-  // RX mode is implmented with RXCONTINUOUS
-  // max message data length is 255 - 4 = 251 octets
-  setModeIdle();
-
-  // Set up default configuration
-  // No Sync Words in LORA mode.
-
-  spiWrite(RH_RF95_REG_1D_MODEM_CONFIG1, 0x72);
-  spiWrite(RH_RF95_REG_1E_MODEM_CONFIG2, 0x74);
-  spiWrite(RH_RF95_REG_26_MODEM_CONFIG3, 0x00);
-
-  //setModemConfig(0); // Radio default
-  //setModemConfig(Bw125Cr48Sf4096); // slow and reliable?
-  setPreambleLength(8); // Default is 8
-  // An innocuous ISM frequency, same as RF22's
-  setFrequency(915.0);
-  // Lowish power
-  setTxPower(13, false);
-
-  return true;
-}
-
 
 void handleInterrupts(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action) {
   // Read the interrupt register
@@ -630,14 +553,15 @@ void handleInterrupts(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action) {
 
     // We have received a message.
     validateRxBuf(); 
-    if (_rxBufValid) {
+    if (_rxBufValid)
       setModeIdle(); // Got one 
-    }
   } else if (_mode == RHModeTx && irq_flags & RH_RF95_TX_DONE) {
     _txGood++;
     setModeIdle();
+  } else if (_mode == RHModeCad && irq_flags & RH_RF95_CAD_DONE) {
+    _cad = irq_flags & RH_RF95_CAD_DETECTED;
+    setModeIdle();
   }
-
     // Sigh: on some processors, for some unknown reason, doing this only once does not actually
     // clear the radio's interrupt flag. So we do it twice. Why?
     spiWrite(RH_RF95_REG_12_IRQ_FLAGS, 0xff); // Clear all IRQ flags
@@ -645,13 +569,54 @@ void handleInterrupts(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action) {
 }
 
 
+void setPreambleLength(uint16_t bytes) {
+    spiWrite(RH_RF95_REG_20_PREAMBLE_MSB, bytes >> 8);
+    spiWrite(RH_RF95_REG_21_PREAMBLE_LSB, bytes & 0xff);
+}
+
+//bool RH_RF95::init()
+bool init() {
+    spiWrite(RH_RF95_REG_01_OP_MODE, RH_RF95_MODE_SLEEP | RH_RF95_LONG_RANGE_MODE);
+    nrf_delay_ms(10); // Wait for sleep mode to take over from say, CAD
+    // Check we are in sleep mode, with LORA set
+    if (spiRead(RH_RF95_REG_01_OP_MODE) != (RH_RF95_MODE_SLEEP | RH_RF95_LONG_RANGE_MODE)) {
+      return false; // No device present?
+    }
+
+    // Set up FIFO
+    // We configure so that we can use the entire 256 byte FIFO for either receive
+    // or transmit, but not both at the same time
+    spiWrite(RH_RF95_REG_0E_FIFO_TX_BASE_ADDR, 0);
+    spiWrite(RH_RF95_REG_0F_FIFO_RX_BASE_ADDR, 0);
+
+    // Packet format is preamble + explicit-header + payload + crc
+    // Explicit Header Mode
+    // payload is TO + FROM + ID + FLAGS + message data
+    // RX mode is implmented with RXCONTINUOUS
+    // max message data length is 255 - 4 = 251 octets
+
+    setModeIdle();
+
+    // Set up default configuration
+    // No Sync Words in LORA mode.
+
+    //setModemConfig(0); // Radio default
+//    setModemConfig(Bw125Cr48Sf4096); // slow and reliable?
+    setPreambleLength(8); // Default is 8
+    // An innocuous ISM frequency, same as RF22's
+    setFrequency(915.0);
+    // Lowish power
+    setTxPower(13, false);
+
+    return true;
+}
+ 
 bool send(const uint8_t* data, uint8_t len) {
   if (len > RH_RF95_MAX_MESSAGE_LEN)
     return false;
 
   waitPacketSent(); // Make sure we dont interrupt an outgoing message
   setModeIdle();
-
   // Position at the beginning of the FIFO
   spiWrite(RH_RF95_REG_0D_FIFO_ADDR_PTR, 0);
   // The headers
@@ -664,10 +629,10 @@ bool send(const uint8_t* data, uint8_t len) {
   spiWrite(RH_RF95_REG_22_PAYLOAD_LENGTH, len + RH_RF95_HEADER_LEN);
 
   setModeTx(); // Start the transmitter
+  printf("TxDone\n");
   // when Tx is done, interruptHandler will fire and radio mode will return to STANDBY
   return true;
 }
-
 
 bool waitAvailableTimeout(uint16_t timeout) {
   uint16_t counter = 0;
@@ -676,65 +641,145 @@ bool waitAvailableTimeout(uint16_t timeout) {
     nrf_delay_ms(200);
     printf("waiting... \n");
     if (available()) {
-      return true;
+      printf("true\n");
+        return true;
     }
     //pthread_yield();  
   }
   return false;
 }
 
-// bool waitAvailableTimeout(uint16_t timeout) {
-//   unsigned long starttime = time(NULL);
-//   while ((time(NULL) - starttime) < timeout) {
-//     nrf_delay_ms(200);
-//     printf("waiting... \n");
-//     printf("%lu\n", (time(NULL) - starttime));
-//     if (available()) {
-//       return true;
-//     }
-//     //pthread_yield();  
-//   }
-//   return false;
-// }
+int16_t packetnum = 0;  // packet counter, we increment per xmission
 
 void loop() {
-  if (available()) {
-    // Should be a message for us now   
-    uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
-    uint8_t len = sizeof(buf);
-
-    uint8_t on[] = "turn on";
-    uint8_t off[] = "turn off";
-
-    uint8_t data[] = "And hello back to you";
-
+  printf("Sending to rf95_server\n");
+  // Send a message to rf95_server
+  
+  char radiopacket[20] = "Bello World #      ";
+  itoa(packetnum++, radiopacket+13, 10);
+  radiopacket[19] = 0;
+  
+  printf("Sending...\n");
+  nrf_delay_ms(10);
+  send((uint8_t *)radiopacket, 20);
+ 
+  printf("Waiting for packet to complete...\n");
+  nrf_delay_ms(10);
+  waitPacketSent();
+  // Now wait for a reply
+  uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+  uint8_t len = sizeof(buf);
+ 
+  printf("Waiting for reply...\n");
+  //nrf_delay_ms(500);
+  if (waitAvailableTimeout(1000)) { 
+    // Should be a reply message for us now   
     if (recv(buf, &len)) {
-
-      if (on[6] == buf[6]) {
-        nrf_gpio_pin_clear(LED);
-        nrf_gpio_pin_set(SWITCH);
-        strcpy(data,"Turned on.");
-      }
-      if (off[6] == buf[6]) {
-        nrf_gpio_pin_set(LED);
-        nrf_gpio_pin_clear(SWITCH);
-        strcpy(data,"Turned off.");
-      }
-
-      printf("Got something:");
-      printf("%s\n", buf);
-      printf("%s\n", data);
-
-      nrf_delay_ms(100);
-
-      // Send a reply
-      send(data, sizeof(data));
-      waitPacketSent();
-      printf("Sent a reply\n");
-    } else {
+      printf("Got reply:");
+      printf("%s\n", buf);    }
+    else {
       printf("Receive failed\n");
     }
   }
+  else {
+    printf("No reply, is there a listener around?\n");
+  }
+  //nrf_delay_ms(1000);
+}
+
+void loop_button_on() {
+  
+    printf("Sending 'turn on' to rf95_server\n");
+    // Send a message to rf95_server
+  
+    char radiopacket[20] = "turn on     #";
+    itoa(packetnum++, radiopacket+13, 10);
+    radiopacket[19] = 0;
+  
+    printf("Sending...\n");
+    nrf_delay_ms(10);
+    send((uint8_t *)radiopacket, 20);
+ 
+    printf("Waiting for packet to complete...\n");
+    nrf_delay_ms(10);
+    waitPacketSent();
+    // Now wait for a reply
+    uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+    uint8_t len = sizeof(buf);
+ 
+    printf("Waiting for reply...\n");
+    //nrf_delay_ms(500);
+    if (waitAvailableTimeout(1000)) { 
+      // Should be a reply message for us now   
+      if (recv(buf, &len)) {
+          printf("Got reply:");
+          printf("%s\n", buf);   
+          flag = 0;
+          return;
+        }
+      else {
+          printf("Receive failed\n");
+      }
+    }
+    else {
+      printf("No reply, is there a listener around?\n");
+    }
+    //nrf_delay_ms(1000);
+  
+}
+
+void loop_button_off() {
+  
+    printf("Sending 'turn off' to rf95_server\n");
+    // Send a message to rf95_server
+  
+    char radiopacket[20] = "turn off     #";
+    itoa(packetnum++, radiopacket+13, 10);
+    radiopacket[19] = 0;
+  
+    printf("Sending...\n");
+    nrf_delay_ms(10);
+    send((uint8_t *)radiopacket, 20);
+ 
+    printf("Waiting for packet to complete...\n");
+    nrf_delay_ms(10);
+    waitPacketSent();
+    // Now wait for a reply
+    uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+    uint8_t len = sizeof(buf);
+ 
+    printf("Waiting for reply...\n");
+    nrf_delay_ms(500);
+    if (waitAvailableTimeout(1000)) { 
+      // Should be a reply message for us now   
+      if (recv(buf, &len)) {
+          printf("Got reply:");
+          printf("%s\n", buf);   
+          flag = 0;
+          return;
+        }
+      else {
+          printf("Receive failed\n");
+      }
+    }
+    else {
+      printf("No reply, is there a listener around?\n");
+    }
+    //nrf_delay_ms(1000);
+  }
+
+
+void button_on() {
+  flag = 1;
+}
+
+void button_off() {
+  flag = 2;
+}
+
+void location_ready() {
+	printf("interrupt\n");
+  data_ready = 1;
 }
 
 static void gpio_init(void) {
@@ -743,35 +788,431 @@ static void gpio_init(void) {
     err_code = nrf_drv_gpiote_init();
     APP_ERROR_CHECK(err_code);
 
-    nrf_drv_gpiote_in_config_t in_config = GPIOTE_CONFIG_IN_SENSE_TOGGLE(true);
-    in_config.pull = NRF_GPIO_PIN_PULLUP;
+    nrf_drv_gpiote_in_config_t in_config_G0 = GPIOTE_CONFIG_IN_SENSE_LOTOHI(true);
+    in_config_G0.pull = NRF_GPIO_PIN_PULLUP;
 
-    err_code = nrf_drv_gpiote_in_init(RFM95_INT, &in_config, handleInterrupts);
+    err_code = nrf_drv_gpiote_in_init(RFM95_INT, &in_config_G0, handleInterrupts);
+    err_code = nrf_drv_gpiote_in_init(DWM_INT, &in_config_G0, location_ready);
     APP_ERROR_CHECK(err_code);
 
+    nrf_drv_gpiote_in_config_t in_config_Button = GPIOTE_CONFIG_IN_SENSE_HITOLO(true);
+    in_config_Button.pull = NRF_GPIO_PIN_PULLUP;
+
+    err_code = nrf_drv_gpiote_in_init(BUTTON_1, &in_config_Button, button_on);
+    err_code = nrf_drv_gpiote_in_init(BUTTON_2, &in_config_Button, button_off);
+    APP_ERROR_CHECK(err_code);
+
+
+
+
+
     nrf_drv_gpiote_in_event_enable(RFM95_INT, true);
+    nrf_drv_gpiote_in_event_enable(BUTTON_1, true);
+    nrf_drv_gpiote_in_event_enable(BUTTON_2, true);
+    nrf_drv_gpiote_in_event_enable(DWM_INT, true);
+
 }
 
+
+void update_message(uint8_t *msg, size_t msg_len) {
+	
+  for (size_t i = 0; i < msg_len; i++) {
+    //printf("%x\n", msg[i]);
+    msg[i] = msg[i] << 1;
+    //printf("%x\n", msg[i]);
+  }
+}
+
+// void dwm_tag_init() {
+//   // we want 11011111 
+//   // uwb_mode active, fw_update_en, ble_en, led_en, reserved, loc-engine_en, low_power_en
+//   uint8_t data[4];
+//   data[0] = 0x05;
+//   data[1] = 0x02;
+//   data[2] = 0xDE;
+//   data[3] = 0x00;
+  
+//   update_message(data, 4);
+//   nrf_drv_spi_init(spi_instance, &dwm_spi_config, NULL, NULL);
+//   ret_code_t err_code = nrf_drv_spi_transfer(spi_instance, data, 4, NULL, 0);
+//   APP_ERROR_CHECK(err_code);
+//   if (err_code != NRF_SUCCESS) {
+//     return NULL;  
+//   }
+//   nrf_delay_ms(1000);
+//   uint8_t size_num[2];
+//   err_code = nrf_drv_spi_transfer(spi_instance, NULL, 0, size_num, 2);
+  
+//   while (size_num[0] == 0x00 ) {
+//     APP_ERROR_CHECK(err_code);
+//     if (err_code != NRF_SUCCESS) {
+//       return NULL;
+//     }
+//     nrf_delay_ms(10);
+//     err_code = nrf_drv_spi_transfer(spi_instance, NULL, 0, size_num, 2);
+//   }
+//   printf("%x %x\n", size_num[0], size_num[1]);
+//   uint8_t* readData = (uint8_t *)malloc(sizeof(uint8_t)*size_num[0]);
+//   err_code = nrf_drv_spi_transfer(spi_instance, NULL, 0, readData, size_num[0]);
+//   APP_ERROR_CHECK(err_code);
+//   if (err_code != NRF_SUCCESS) {
+//     return NULL;
+//   }
+//   printf("%x %x %x\n", readData[0], readData[1], readData[2]);
+//   nrf_drv_spi_uninit(spi_instance);
+//   return;
+// }
+
+
+uint8_t* dwm_tag_init(nrf_drv_spi_t* s) {
+  nrf_drv_spi_t* spi = s;
+  // we want 11011110 = de
+  // uwb_mode active, fw_update_en, ble_en, led_en, reserved, loc-engine_en, low_power_en
+  uint8_t data[4];
+  data[0] = 0x05;
+  data[1] = 0x02;
+  data[2] = 0xDE;
+  data[3] = 0x00;
+  update_message(data, 4);
+  printf("1\n");
+  ret_code_t err_code = nrf_drv_spi_transfer(spi, data, 4, NULL, 0);
+  printf("2\n");
+  APP_ERROR_CHECK(err_code);
+  if (err_code != NRF_SUCCESS) {
+    return NULL;  
+  }
+  uint8_t size_num[2];
+  printf("2\n");
+  err_code = nrf_drv_spi_transfer(spi, NULL, 0, size_num, 2);
+  printf("3\n");
+  while (size_num[0] == 0x00) {
+    APP_ERROR_CHECK(err_code);
+    if (err_code != NRF_SUCCESS) {
+      return NULL;
+    }
+    nrf_delay_ms(10);
+    err_code = nrf_drv_spi_transfer(spi, NULL, 0, size_num, 2);
+  }
+  printf("%x %x\n", size_num[0], size_num[1]);
+  uint8_t* readData = (uint8_t *)malloc(sizeof(uint8_t)*size_num[0]);
+  err_code = nrf_drv_spi_transfer(spi, NULL, 0, readData, size_num[0]);
+  APP_ERROR_CHECK(err_code);
+  if (err_code != NRF_SUCCESS) {
+    return NULL;
+  }
+  printf("%x %x %x\n", readData[0], readData[1], readData[2]);
+  return readData;
+}
+
+
+int dwm_loc_get(dwm_loc_data_t* loc)
+{ 
+   uint8_t tx_data[DWM1001_TLV_MAX_SIZE], tx_len = 0;
+   uint8_t rx_data[DWM1001_TLV_MAX_SIZE];
+   uint16_t rx_len;
+   uint8_t data_cnt, i, j;
+   
+   tx_data[tx_len++] = DWM1001_TLV_TYPE_CMD_LOC_GET;
+   tx_data[tx_len++] = 0;
+   //update_message(tx_data, 2);  
+   // LMH_Tx(tx_data, &tx_len);   
+   // initial spi
+   nrf_drv_spi_init(spi_instance, &dwm_spi_config, NULL, NULL);
+   // send TLV request
+   ret_code_t err = nrf_drv_spi_transfer(spi_instance, tx_data, tx_len, NULL, 0);
+   if (err != NRF_SUCCESS) {
+   	 return NULL;
+   }
+
+   // get (size per transmission, num_transitions)
+   uint8_t size_num[2];
+   err = nrf_drv_spi_transfer(spi_instance, NULL, 0, size_num, 2);
+   while(size_num[0] == 0x00) {
+    
+    if (err != NRF_SUCCESS) {
+      return NULL;
+    }
+    nrf_delay_ms(10);
+    err= nrf_drv_spi_transfer(spi_instance, NULL, 0, size_num, 2);
+   }
+   printf("%x %x\n", size_num[0], size_num[1]);
+
+   //reading data
+   err = nrf_drv_spi_transfer(spi_instance, NULL, 0, rx_data, size_num[0]);
+   rx_len = strlen(*rx_data);
+   if (err != NRF_SUCCESS) {
+   	return NULL;
+   }
+   
+   int k = 0;
+  	while (k < size_num[0]) {
+  		printf("%x ", rx_data[k++]);
+  	}
+  	printf("\n");
+  	nrf_delay_ms(1000);
+
+   // if(LMH_WaitForRx(rx_data, &rx_len, DWM1001_TLV_MAX_SIZE) == RV_OK)
+   if(err == NRF_SUCCESS)
+   {
+      if(rx_len<RESP_ERRNO_LEN+RESP_DATA_LOC_LOC_SIZE + RESP_DATA_LOC_DIST_LEN_MIN)// ok + pos + distance/range
+      {
+      	 
+         nrf_drv_spi_uninit(spi_instance);
+         return RV_ERR;
+      }
+      
+      if(rx_data[RESP_DAT_TYPE_OFFSET]==DWM1001_TLV_TYPE_POS_XYZ)//0x41
+      {
+         // node self position.
+         data_cnt = RESP_DAT_VALUE_OFFSET;// jump Type and Length, goto data
+         loc->p_pos->x = rx_data[data_cnt] 
+                      + (rx_data[data_cnt+1]<<8) 
+                      + (rx_data[data_cnt+2]<<16) 
+                      + (rx_data[data_cnt+3]<<24); 
+         data_cnt += 4;
+         loc->p_pos->y = rx_data[data_cnt] 
+                      + (rx_data[data_cnt+1]<<8) 
+                      + (rx_data[data_cnt+2]<<16) 
+                      + (rx_data[data_cnt+3]<<24); 
+         data_cnt += 4;
+         loc->p_pos->z = rx_data[data_cnt] 
+                      + (rx_data[data_cnt+1]<<8) 
+                      + (rx_data[data_cnt+2]<<16) 
+                      + (rx_data[data_cnt+3]<<24); 
+         data_cnt += 4;
+         loc->p_pos->qf = rx_data[data_cnt++];
+      }
+      
+      if(rx_data[RESP_DATA_LOC_DIST_OFFSET]==DWM1001_TLV_TYPE_RNG_AN_DIST)//0x48
+      {
+         // node is Anchor, recording Tag ID, distances and qf
+         loc->anchors.dist.cnt = rx_data[RESP_DATA_LOC_DIST_OFFSET+2];
+         loc->anchors.an_pos.cnt = 0;
+         data_cnt = RESP_DATA_LOC_DIST_OFFSET + 3; // jump Type, Length and cnt, goto data
+         for (i = 0; i < loc->anchors.dist.cnt; i++)
+         {
+            // Tag ID
+            loc->anchors.dist.addr[i] = 0;
+            for (j = 0; j < 8; j++)
+            {
+               loc->anchors.dist.addr[i] += rx_data[data_cnt++]<<(j*8);
+            }
+            // Tag distance
+            loc->anchors.dist.dist[i] = 0;
+            for (j = 0; j < 4; j++)
+            {
+               loc->anchors.dist.dist[i] += rx_data[data_cnt++]<<(j*8);
+            }
+            // Tag qf
+            loc->anchors.dist.qf[i] = rx_data[data_cnt++];
+         }
+      }
+      else if (rx_data[RESP_DATA_LOC_DIST_OFFSET]==DWM1001_TLV_TYPE_RNG_AN_POS_DIST)//0x49
+      {
+         // node is Tag, recording Anchor ID, distances, qf and positions
+         loc->anchors.dist.cnt = rx_data[RESP_DATA_LOC_DIST_OFFSET+2];
+         loc->anchors.an_pos.cnt = rx_data[RESP_DATA_LOC_DIST_OFFSET+2];
+         data_cnt = RESP_DATA_LOC_DIST_OFFSET + 3; // jump Type, Length and cnt, goto data
+         for (i = 0; i < loc->anchors.dist.cnt; i++)
+         {
+            // anchor ID
+            loc->anchors.dist.addr[i] = 0;
+            for (j = 0; j < 2; j++)
+            {
+               loc->anchors.dist.addr[i] += ((uint64_t)rx_data[data_cnt++])<<(j*8);
+            }
+            // anchor distance
+            loc->anchors.dist.dist[i] = 0;
+            for (j = 0; j < 4; j++)
+            {
+               loc->anchors.dist.dist[i] += ((uint32_t)rx_data[data_cnt++])<<(j*8);
+            }
+            // anchor qf
+            loc->anchors.dist.qf[i] = rx_data[data_cnt++];
+            // anchor position
+            loc->anchors.an_pos.pos[i].x  = rx_data[data_cnt] 
+                                         + (rx_data[data_cnt+1]<<8) 
+                                         + (rx_data[data_cnt+2]<<16) 
+                                         + (rx_data[data_cnt+3]<<24); 
+            data_cnt += 4;
+            loc->anchors.an_pos.pos[i].y = rx_data[data_cnt] 
+                                         + (rx_data[data_cnt+1]<<8) 
+                                         + (rx_data[data_cnt+2]<<16) 
+                                         + (rx_data[data_cnt+3]<<24); 
+            data_cnt += 4;
+            loc->anchors.an_pos.pos[i].z = rx_data[data_cnt] 
+                                         + (rx_data[data_cnt+1]<<8) 
+                                         + (rx_data[data_cnt+2]<<16) 
+                                         + (rx_data[data_cnt+3]<<24); 
+            data_cnt += 4;
+            loc->anchors.an_pos.pos[i].qf = rx_data[data_cnt++];
+         }
+      }
+      else
+      {
+      	
+         nrf_drv_spi_uninit(spi_instance);
+         return RV_ERR;   
+      }
+   }
+   else
+   {
+
+      nrf_drv_spi_uninit(spi_instance);
+      return RV_ERR;   
+   }
+   nrf_drv_spi_uninit(spi_instance);
+   return RV_OK;
+}
+
+
+
+int get_loc(void)
+{
+   // ========== dwm_loc_get ==========
+   int rv, err_cnt = 0, i; 
+   
+   dwm_loc_data_t loc;
+   dwm_pos_t pos;
+   loc.p_pos = &pos;
+   printf("dwm_loc_get(&loc)\n");
+   rv = Test_CheckTxRx(dwm_loc_get(&loc));
+   
+   gettimeofday(&tv,NULL);      
+      
+   if(rv == RV_OK)
+   {
+      printf("ts:%ld.%06ld [%d,%d,%d,%u]\n", tv.tv_sec, tv.tv_usec, loc.p_pos->x, loc.p_pos->y, loc.p_pos->z, loc.p_pos->qf);
+      printf("ts:%ld.%06ld [%d,%d,%d,%u]", tv.tv_sec, tv.tv_usec, loc.p_pos->x, loc.p_pos->y, loc.p_pos->z, loc.p_pos->qf);
+
+      for (i = 0; i < loc.anchors.dist.cnt; ++i) 
+      {
+         // HAL_Log("#%u)", i);
+         printf("#%u)", i);
+         // HAL_Log("a:0x%08x", loc.anchors.dist.addr[i]);
+         printf("a:0x%08x", loc.anchors.dist.addr[i]);
+         if (i < loc.anchors.an_pos.cnt) 
+         {
+            // HAL_Log("[%d,%d,%d,%u]", loc.anchors.an_pos.pos[i].x,
+            //       loc.anchors.an_pos.pos[i].y,
+            //       loc.anchors.an_pos.pos[i].z,
+            //       loc.anchors.an_pos.pos[i].qf);
+            printf("[%d,%d,%d,%u]", loc.anchors.an_pos.pos[i].x,
+                  loc.anchors.an_pos.pos[i].y,
+                  loc.anchors.an_pos.pos[i].z,
+                  loc.anchors.an_pos.pos[i].qf);
+         }
+         // HAL_Log("d=%u,qf=%u\n", loc.anchors.dist.dist[i], loc.anchors.dist.qf[i]);
+         printf("d=%u,qf=%u", loc.anchors.dist.dist[i], loc.anchors.dist.qf[i]);
+      }
+         // HAL_Log("\n");
+         printf("\n");
+   }
+   err_cnt += rv;   
+   
+   return err_cnt;
+}
+
+int dwm_int_cfg_set(uint16_t value)
+{        
+   uint8_t tx_data[DWM1001_TLV_MAX_SIZE], tx_len = 0;
+   uint8_t rx_data[DWM1001_TLV_MAX_SIZE];
+   uint16_t rx_len;
+   tx_data[tx_len++] = DWM1001_TLV_TYPE_CMD_INT_CFG_SET;
+   tx_data[tx_len++] = 2;
+   tx_data[tx_len++] = value & 0xff;    
+   tx_data[tx_len++] = (value>>8) & 0xff;   
+   //LMH_Tx(tx_data, &tx_len);   
+   nrf_drv_spi_init(spi_instance, &dwm_spi_config, NULL, NULL);
+   update_message(tx_data, tx_len);
+   ret_code_t err = nrf_drv_spi_transfer(spi_instance, tx_data, tx_len, NULL, 0);
+   if (err != NRF_SUCCESS) {
+      return NULL;
+    }
+
+   // get (size per transmission, num_transitions)
+   uint8_t size_num[2];
+   err = nrf_drv_spi_transfer(spi_instance, NULL, 0, size_num, 2);
+   while(size_num[0] == 0x00) {
+    
+    if (err != NRF_SUCCESS) {
+      return NULL;
+    }
+    nrf_delay_ms(10);
+    err= nrf_drv_spi_transfer(spi_instance, NULL, 0, size_num, 2);
+   }
+   printf("size: %x num: %x\n", size_num[0], size_num[1]);
+
+   //reading data
+   err = nrf_drv_spi_transfer(spi_instance, NULL, 0, rx_data, size_num[0]);
+   rx_len = strlen(*rx_data);
+   if (err != NRF_SUCCESS) {
+   	return NULL;
+   }
+   nrf_drv_spi_uninit(spi_instance);
+   return (rx_data[0] == 0x40);
+   
+   //return LMH_WaitForRx(rx_data, &rx_len, 3);
+   //return (err == NRF_SUCCESS);
+}
+
+
+
+void spi_les_test(void)
+{   
+   // int err_cnt = 0;  
+   // uint16_t panid;
+   // uint16_t ur_set;
+   // uint16_t ur_s_set;
+   
+   //initializing spi (no need)
+   // {//init
+   //    printf("Initializing...\n"); 
+   //    dwm_init();
+   //    err_cnt += frst();
+   //    printf("Done\n");
+   // }
+   
+   /* ========= published APIs =========*/
+   
+   
+   
+   // setup tag update rate
+   //ur_s_set = ur_set = 1;
+   // HAL_Log("dwm_upd_rate_set(ur_set, ur_s_set);\n");
+   //dwm_upd_rate_set(ur_set, ur_s_set);
+   
+   // setup PANID
+   //panid = 1;
+   // printf("dwm_panid_set(panid);\n");
+   //dwm_panid_set(panid);
+   
+   // setup GPIO interrupt from "LOC_READY" event
+   // HAL_Log("dwm_int_cfg_set(DWM1001_INTR_LOC_READY);\n");
+   
+   // HAL_GPIO_SetupCb(HAL_GPIO_DRDY, HAL_GPIO_INT_EDGE_RISING, &gpio_cb);
+   
+   // setup encryption key for network
+   // setup_enc();
+   
+   // while(1)
+   // {
+   	
+      if(data_ready == 1)
+      {
+         data_ready = 0;
+         get_loc();
+      }
+      nrf_delay_ms(1);
+   // }
+   
+   // printf("err_cnt = %d \n", err_cnt);
+      
+   // Test_End();
+}
+
+
 int main(void) {
-    ret_code_t ret;
-
-    size_t * p_written = 0;
-
-    ret = nrf_drv_clock_init();
-    APP_ERROR_CHECK(ret);
-    //ret = nrf_drv_power_init(NULL);
-    APP_ERROR_CHECK(ret);
-
-    nrf_drv_clock_lfclk_request(NULL);
-    ret = app_timer_init();
-    APP_ERROR_CHECK(ret);
-
-    // // Initialize LEDs and buttons.
-    // bsp_board_init(BSP_INIT_LEDS | BSP_INIT_BUTTONS);
-
-    ret = nrf_serial_init(&serial_uart, &m_uart0_drv_config, &serial_config);
-    APP_ERROR_CHECK(ret);
-
   // initialize RTT library
   ret_code_t error_code = NRF_SUCCESS;
   error_code = NRF_LOG_INIT(NULL);
@@ -779,17 +1220,13 @@ int main(void) {
   NRF_LOG_DEFAULT_BACKENDS_INIT();
   printf("Log initialized!\n");
 
-  // initialize GPIO driver/interrupts
+  // initialize interrupts
   gpio_init();
+  // // Our own interrupt handler.
+  // NRF_GPIOTE->CONFIG[0] = 1 | (RFM95_INT << 8) | (1 << 16);
+  // NRF_GPIOTE->INTENSET = 1;
+  // NVIC_EnableIRQ(GPIOTE_IRQn);
 
-  // manually-controlled (simple) output, initially set
-  nrfx_gpiote_out_config_t out_config = NRFX_GPIOTE_CONFIG_OUT_SIMPLE(true);
-  error_code = nrfx_gpiote_out_init(LED, &out_config);
-  error_code = nrfx_gpiote_out_init(SWITCH, &out_config);
-  APP_ERROR_CHECK(error_code);
-
-  nrf_gpio_pin_set(LED);
-  nrf_gpio_pin_clear(SWITCH);
 
   spi_instance = &instance;
 
@@ -801,21 +1238,42 @@ int main(void) {
     .irq_priority = NRFX_SPI_DEFAULT_CONFIG_IRQ_PRIORITY,
     .orc = 0,
     .frequency = NRF_DRV_SPI_FREQ_1M,
-    .mode = 0,
-    .bit_order = 0
+    .mode = NRF_DRV_SPI_MODE_0,
+    .bit_order = NRF_DRV_SPI_BIT_ORDER_MSB_FIRST
+  };
+
+  nrf_drv_spi_config_t dwm_config = {
+    .sck_pin = DWM_SCLK,
+    .mosi_pin = DWM_MOSI,
+    .miso_pin = DWM_MISO,
+    .ss_pin = DWM_CS,
+    .irq_priority = NRFX_SPI_DEFAULT_CONFIG_IRQ_PRIORITY,
+    .orc = 0,
+    .frequency = NRF_DRV_SPI_FREQ_1M,
+    .mode = NRF_DRV_SPI_MODE_0,
+    .bit_order = NRF_DRV_SPI_BIT_ORDER_MSB_FIRST
   };
 
   spi_config = config;
 
+  dwm_spi_config = dwm_config;
+  
+
+
   nrf_gpio_pin_dir_set(RFM95_RST, NRF_GPIO_PIN_DIR_OUTPUT);
+  nrf_gpio_pin_dir_set(DWM_RST, NRF_GPIO_PIN_DIR_OUTPUT);
   nrf_gpio_pin_write(RFM95_RST, 1);
-  printf("Arduino LoRa RX Test!\n");
+  nrf_gpio_pin_write(DWM_RST, 1);
+  printf("Arduino LoRa TX Test!\n");
   // manual reset
   nrf_gpio_pin_write(RFM95_RST, 0);
+  nrf_gpio_pin_write(DWM_RST, 0);
   nrf_delay_ms(10);
   nrf_gpio_pin_write(RFM95_RST, 1);
-
+  nrf_gpio_pin_write(DWM_RST, 1);
   nrf_delay_ms(10);
+
+
   while (!init()) {
     printf("LoRa radio init failed\n");
     while (1);
@@ -826,14 +1284,30 @@ int main(void) {
     printf("setFrequency failed\n");
     while (1);
   }
+  // Defaults after init are 434.0MHz, 13dBm, Bw = 125 kHz, Cr = 4/5, Sf = 128chips/symbol, CRC on
+  // The default transmitter power is 13dBm, using PA_BOOST.
+  // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then 
+  // you can set transmitter powers from 5 to 23 dBm:
   setTxPower(23, false);
+  //dwm_int_cfg_set(DWM1001_INTR_LOC_READY);
+
+  uint8_t* readData = dwm_tag_init(spi_instance);
+  while (readData[0] != 0x40 || readData[2] != 0x00) {
+    printf("Config errored!");
+    free(readData);
+    readData = dwm_tag_init(spi_instance);
+  }
 
   while (1) {
-    loop();
-    read_gps();
-    printf("%s", store);
-        
-    //nrf_delay_ms(1000);
+    //spi_les_test();
+  	get_loc();
+  	nrf_delay_ms(1000);
+    if(flag == 1){
+      loop_button_on();
+    }
+    if(flag == 2){
+      loop_button_off();
+    }
   }
 }
 
