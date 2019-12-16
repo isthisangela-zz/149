@@ -12,7 +12,7 @@
 #include <pthread.h>
 #include <time.h>
 
-#include "dwm_api.h"
+//#include "dwm_api.h"
 #include "test_util.h"
 #include "nrf_drv_gpiote.h"
 #include "app_error.h"
@@ -236,6 +236,14 @@
 #define DISPLAY_LINE_1 1
 
 
+// #define NRF_DRV_SPI_INSTANCE(id)    NRF_DRV_SPI_INSTANCE_(id)
+
+// #define NRF_DRV_SPI_INSTANCE_(id)   NRF_DRV_SPI_INSTANCE_ ## id
+
+// #define NRF_DRV_SPI_INSTANCE_2 \
+// 	{ 2, { .spim = NRFX_SPIM_INSTANCE(2) }, true }
+
+
 // SPI
 // LoRa Module pin connections
 // Reset
@@ -260,17 +268,17 @@
 // SPI
 // DWM Module pin connections
 // Reset
-#define DWM_RST     NRF_GPIO_PIN_MAP(0,27)
+//#define DWM_RST     NRF_GPIO_PIN_MAP(0,27)
 // Slave/chip select
-#define DWM_CS      NRF_GPIO_PIN_MAP(0,26)
+#define DWM_CS      NRF_GPIO_PIN_MAP(0,27)
 // Master out, slave in
-#define DWM_MOSI    NRF_GPIO_PIN_MAP(0,25)
+#define DWM_MOSI    NRF_GPIO_PIN_MAP(0,2)
 // Master in, slave out
-#define DWM_MISO    NRF_GPIO_PIN_MAP(0,24)
+#define DWM_MISO    NRF_GPIO_PIN_MAP(0,25)
 // Clock
-#define DWM_SCLK    NRF_GPIO_PIN_MAP(0,2)
-// Interrupt
-#define DWM_INT     NRF_GPIO_PIN_MAP(0,23) 
+#define DWM_SCLK    NRF_GPIO_PIN_MAP(0,26)
+// // Interrupt
+// #define DWM_INT     NRF_GPIO_PIN_MAP(0,23) 
 
 
 #define RH_RF95_FIFO_SIZE 255
@@ -313,7 +321,24 @@
 #define RESP_DAT_VALUE_OFFSET    RESP_DAT_LEN_OFFSET+1
 #define RESP_DATA_LOC_LOC_SIZE     15
 #define RESP_DATA_LOC_DIST_OFFSET  RESP_DAT_TYPE_OFFSET + RESP_DATA_LOC_LOC_SIZE
+
+#define DWM1001_TLV_TYPE_POS_XYZ                   0x41  /* position coordinates x,y,z*/
+
+#define RV_OK           (0)      /*  ret value OK */
+#define RV_ERR          (1)      /*  ret value ERROR: unknown command or broken tlv frame */
+
+#define RESP_ERRNO_LEN           3
+#define RESP_DAT_TYPE_OFFSET     RESP_ERRNO_LEN
+#define RESP_DAT_LEN_OFFSET      RESP_DAT_TYPE_OFFSET+1
+#define RESP_DAT_VALUE_OFFSET    RESP_DAT_LEN_OFFSET+1
+
+#define RESP_DATA_LOC_LOC_SIZE     15
+#define RESP_DATA_LOC_DIST_OFFSET  RESP_DAT_TYPE_OFFSET + RESP_DATA_LOC_LOC_SIZE
 #define RESP_DATA_LOC_DIST_LEN_MIN 3
+#define DWM1001_TLV_TYPE_RNG_AN_POS_DIST           0x49  /* ranging anchor distances and positions*/
+#define DWM1001_TLV_TYPE_RNG_AN_DIST               0x48  /* ranging anchor distances*/
+/* Maximum number of neighbor anchors */
+#define DWM_RANGING_ANCHOR_CNT_MAX	14
 
 
 typedef enum {
@@ -383,6 +408,8 @@ uint64_t ts_last = 0;
 volatile uint8_t data_ready;
 
 static nrf_drv_spi_t* spi_instance_2;
+uint8_t switch_flag = 0; // 0 for uwb 1 for gps
+
 
 
 ret_code_t display_init(nrf_drv_spi_t* spi) {
@@ -394,7 +421,7 @@ ret_code_t display_init(nrf_drv_spi_t* spi) {
   write[0] = 0b00001110;
   write[1] = 0b00000000;
   ret_code_t err_code = nrf_drv_spi_transfer(spi_instance_2, write, 2, NULL, 0);
-  APP_ERROR_CHECK(err_code);
+  ////APP_ERROR_CHECK(err_code);
   if (err_code != NRF_SUCCESS) {
     return err_code;
   }
@@ -404,7 +431,7 @@ ret_code_t display_init(nrf_drv_spi_t* spi) {
   write[0] = 0b00000010;
   write[1] = 0b00000000;
   err_code = nrf_drv_spi_transfer(spi_instance_2, write, 2, NULL, 0);
-  APP_ERROR_CHECK(err_code);
+  //APP_ERROR_CHECK(err_code);
   if (err_code != NRF_SUCCESS) {
     return err_code;
   }
@@ -414,7 +441,7 @@ ret_code_t display_init(nrf_drv_spi_t* spi) {
   write[0] = 0b00000000;
   write[1] = 0b01000000;
   err_code = nrf_drv_spi_transfer(spi_instance_2, write, 2, NULL, 0);
-  APP_ERROR_CHECK(err_code);
+  //APP_ERROR_CHECK(err_code);
   if (err_code != NRF_SUCCESS) {
     return err_code;
   }
@@ -424,7 +451,7 @@ ret_code_t display_init(nrf_drv_spi_t* spi) {
   write[0] = 0b00000001;
   write[1] = 0b10000000;
   err_code = nrf_drv_spi_transfer(spi_instance_2, write, 2, NULL, 0);
-  APP_ERROR_CHECK(err_code);
+  //APP_ERROR_CHECK(err_code);
   if (err_code != NRF_SUCCESS) {
     return err_code;
   }
@@ -434,7 +461,7 @@ ret_code_t display_init(nrf_drv_spi_t* spi) {
   write[0] = 0b00000000;
   write[1] = 0b10000000;
   err_code = nrf_drv_spi_transfer(spi_instance_2, write, 2, NULL, 0);
-  APP_ERROR_CHECK(err_code);
+  //APP_ERROR_CHECK(err_code);
   if (err_code != NRF_SUCCESS) {
     return err_code;
   }
@@ -444,7 +471,7 @@ ret_code_t display_init(nrf_drv_spi_t* spi) {
   write[0] = 0b00000011;
   write[1] = 0b01000000;
   err_code = nrf_drv_spi_transfer(spi_instance_2, write, 2, NULL, 0);
-  APP_ERROR_CHECK(err_code);
+  //APP_ERROR_CHECK(err_code);
   if (err_code != NRF_SUCCESS) {
     return err_code;
   }
@@ -454,7 +481,7 @@ ret_code_t display_init(nrf_drv_spi_t* spi) {
   write[0] = 0b01000000;
   write[1] = 0b00000000;
   err_code = nrf_drv_spi_transfer(spi_instance_2, write, 2, NULL, 0);
-  APP_ERROR_CHECK(err_code);
+  //APP_ERROR_CHECK(err_code);
   if (err_code != NRF_SUCCESS) {
     return err_code;
   }
@@ -479,7 +506,7 @@ ret_code_t display_write(const char* string, uint8_t row) {
     write[0] = 0b00100000;
     write[1] = 0b00000000;
     err_code = nrf_drv_spi_transfer(spi_instance_2, write, 2, NULL, 0);
-    APP_ERROR_CHECK(err_code);
+    //APP_ERROR_CHECK(err_code);
     if(err_code != NRF_SUCCESS) return err_code;
 
   } else if (row == 1) {
@@ -487,7 +514,7 @@ ret_code_t display_write(const char* string, uint8_t row) {
     write[0] = 0b00110000;
     write[1] = 0b00000000;
     err_code = nrf_drv_spi_transfer(spi_instance_2, write, 2, NULL, 0);
-    APP_ERROR_CHECK(err_code);
+    //APP_ERROR_CHECK(err_code);
     if(err_code != NRF_SUCCESS) return err_code;
   } else {
     return NRF_ERROR_INVALID_DATA;
@@ -512,7 +539,7 @@ ret_code_t display_write(const char* string, uint8_t row) {
     write[0] = base_char[0] | (to_write >> 2);
     write[1] = base_char[1] | (to_write << 6);
     err_code = nrf_drv_spi_transfer(spi_instance_2, write, 2, NULL, 0);
-    APP_ERROR_CHECK(err_code);
+    //APP_ERROR_CHECK(err_code);
     if (err_code != NRF_SUCCESS) {
       return err_code;
     }
@@ -833,8 +860,80 @@ void loop() {
 }
 
 
+void loop_switch() {
+	//nrf_drv_spi_init(&spi_instance_display, &display_spi_config, NULL, NULL);
+	while(1){
+
+	nrf_delay_ms(1000);
+	char radiopacket[100];
+	
+	printf("Sending 'GPS' to rf95_server\n");
+    	// Send a message to rf95_server
+	strcpy(radiopacket, "GPS     #");
+	
+	
+    itoa(packetnum++, radiopacket+13, 10);
+    radiopacket[19] = 0;
+  
+    printf("Sending...\n");
+    //nrf_delay_ms(10);
+    send((uint8_t *)radiopacket, 20);
+ 
+    printf("Waiting for packet to complete...\n");
+    //nrf_delay_ms(10);
+    waitPacketSent();
+    // Now wait for a reply
+    uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+    uint8_t len = sizeof(buf);
+    uint8_t buf_1[16];
+    uint8_t buf_2[16];
+
+ 
+    printf("Waiting for reply...\n");
+    //nrf_delay_ms(500);
+    if (waitAvailableTimeout(1000)) { 
+      // Should be a reply message for us now   
+      if (recv(buf, &len)) {
+          printf("Got reply:");
+          printf("%s\n", buf); 
+          for(int i=0;i<9;i++){
+          	buf_1[i] = buf[i];
+          	buf_2[i] = buf[i+12];
+          }
+          buf_2[9] = buf[21];
+          buf_1[9] = ' ';
+          buf_2[10] = ' ';
+          buf_1[10] = 'N';
+          buf_2[11] = 'W';
+          buf_1[11] = '\0';
+          buf_2[12] = '\0';
+          nrf_drv_spi_init(&spi_instance_display, &display_spi_config, NULL, NULL);
+  			display_init(&spi_instance_display);
+
+  			display_write(buf_1,DISPLAY_LINE_0);
+			display_write(buf_2,DISPLAY_LINE_1);
+			nrf_drv_spi_uninit(&spi_instance_display);
+      
+        }
+      else {
+          printf("Receive failed\n");
+      }
+    }
+    else {
+      printf("No reply, is there a listener around?\n");
+    }
+    //nrf_delay_ms(1000);
+    if(switch_flag == 0||flag!=0)
+    	break;
+    
+}
+//nrf_drv_spi_uninit(&spi_instance_display);  
+}
+
+
+
 void loop_button(uint8_t on) {
-	char radiopacket[20];
+	char radiopacket[100];
 	if(on == 1){
 		printf("Sending 'turn on' to rf95_server\n");
 		nrf_drv_spi_init(&spi_instance_display, &display_spi_config, NULL, NULL);
@@ -857,11 +956,7 @@ void loop_button(uint8_t on) {
 		strcpy(radiopacket, "turn off     #");
     	
 	}
-	else {
-		printf("Sending 'GPS' to rf95_server\n");
-    	// Send a message to rf95_server
-		strcpy(radiopacket, "GPS     #");
-	}
+	
     itoa(packetnum++, radiopacket+13, 10);
     radiopacket[19] = 0;
   
@@ -899,11 +994,7 @@ void loop_button(uint8_t on) {
           	flag = 0;
            	return;
           }
-          else if(buf[0] == 'G' && on == 3) {
-          	
-          	flag = 0;
-          	return;
-          }
+          
         }
       else {
           printf("Receive failed\n");
@@ -916,49 +1007,6 @@ void loop_button(uint8_t on) {
   
 }
 
-// void loop_button_off() {
-  
-//     printf("Sending 'turn off' to rf95_server\n");
-//     // Send a message to rf95_server
-  
-//     char radiopacket[20] = "turn off     #";
-//     itoa(packetnum++, radiopacket+13, 10);
-//     radiopacket[19] = 0;
-  
-//     printf("Sending...\n");
-//     nrf_delay_ms(10);
-//     send((uint8_t *)radiopacket, 20);
- 
-//     printf("Waiting for packet to complete...\n");
-//     nrf_delay_ms(10);
-//     waitPacketSent();
-//     // Now wait for a reply
-//     uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
-//     uint8_t len = sizeof(buf);
- 
-//     printf("Waiting for reply...\n");
-//     nrf_delay_ms(500);
-//     if (waitAvailableTimeout(1000)) { 
-//       // Should be a reply message for us now   
-//       if (recv(buf, &len)) {
-//           printf("Got reply:");
-//           printf("%s\n", buf); 
-//           if(strcmp(buf, "Turned On")||strcmp(buf,"Turned Off"))  {
-//           	 flag = 0;
-//           	return;
-//           }
-         
-//         }
-//       else {
-//           printf("Receive failed\n");
-//       }
-//     }
-//     else {
-//       printf("No reply, is there a listener around?\n");
-//     }
-//     //nrf_delay_ms(1000);
-//   }
-
 
 void button_on() {
   flag = 1;
@@ -968,27 +1016,27 @@ void button_off() {
   flag = 2;
 }
 
+
 void button_gps() {
-	flag = 3;
+	if(switch_flag == 0)
+		switch_flag = 1;
+	else
+		switch_flag = 0;
 }
 
-void location_ready() {
-	printf("interrupt\n");
-  data_ready = 1;
-}
 
 static void gpio_init(void) {
     ret_code_t err_code;
 
     err_code = nrf_drv_gpiote_init();
-    APP_ERROR_CHECK(err_code);
+    ////APP_ERROR_CHECK(err_code);
 
     nrf_drv_gpiote_in_config_t in_config_G0 = GPIOTE_CONFIG_IN_SENSE_LOTOHI(true);
     in_config_G0.pull = NRF_GPIO_PIN_PULLUP;
 
     err_code = nrf_drv_gpiote_in_init(RFM95_INT, &in_config_G0, handleInterrupts);
-    err_code = nrf_drv_gpiote_in_init(DWM_INT, &in_config_G0, location_ready);
-    APP_ERROR_CHECK(err_code);
+    //err_code = nrf_drv_gpiote_in_init(DWM_INT, &in_config_G0, location_ready);
+    //APP_ERROR_CHECK(err_code);
 
     nrf_drv_gpiote_in_config_t in_config_Button = GPIOTE_CONFIG_IN_SENSE_HITOLO(true);
     in_config_Button.pull = NRF_GPIO_PIN_PULLUP;
@@ -999,7 +1047,7 @@ static void gpio_init(void) {
     err_code = nrf_drv_gpiote_in_init(BUTTON_1, &in_config_Button, button_on);
     err_code = nrf_drv_gpiote_in_init(BUTTON_2, &in_config_Button, button_off);
     err_code = nrf_drv_gpiote_in_init(BUTTON_3, &in_config_Switch, button_gps);
-    APP_ERROR_CHECK(err_code);
+    //APP_ERROR_CHECK(err_code);
 
 
 
@@ -1009,7 +1057,7 @@ static void gpio_init(void) {
     nrf_drv_gpiote_in_event_enable(BUTTON_1, true);
     nrf_drv_gpiote_in_event_enable(BUTTON_2, true);
     nrf_drv_gpiote_in_event_enable(BUTTON_3, true);
-    nrf_drv_gpiote_in_event_enable(DWM_INT, true);
+    //nrf_drv_gpiote_in_event_enable(DWM_INT, true);
 
 }
 
@@ -1040,16 +1088,16 @@ uint8_t* dwm_tag_init() {
   // ret_code_t err_code = nrf_drv_spi_transfer(spi_instance, NULL, 0, state,1);
   // printf("now is: %x", state[0]); 
   ret_code_t err_code = nrf_drv_spi_transfer(spi_instance, data, 4, NULL, 0);
-  APP_ERROR_CHECK(err_code);
+  //APP_ERROR_CHECK(err_code);
   if (err_code != NRF_SUCCESS) {
     return NULL;  
   }
   
-  uint8_t size_num[2];
+  uint8_t size_num[100];
   err_code = nrf_drv_spi_transfer(spi_instance, NULL, 0, size_num, 2);
   
   while (size_num[0] == 0x00 ) {
-    APP_ERROR_CHECK(err_code);
+    //APP_ERROR_CHECK(err_code);
     if (err_code != NRF_SUCCESS) {
       return NULL;
     }
@@ -1059,7 +1107,7 @@ uint8_t* dwm_tag_init() {
   printf("%x %x\n", size_num[0], size_num[1]);
   uint8_t* readData = (uint8_t *)malloc(sizeof(uint8_t)*size_num[0]);
   err_code = nrf_drv_spi_transfer(spi_instance, NULL, 0, readData, size_num[0]);
-  APP_ERROR_CHECK(err_code);
+  //APP_ERROR_CHECK(err_code);
   if (err_code != NRF_SUCCESS) {
     return NULL;
   }
@@ -1068,321 +1116,101 @@ uint8_t* dwm_tag_init() {
   return readData;
 }
 
+void get_loc() {
+	
+	while(1){
+		nrf_delay_ms(1000);
+		uint8_t reset_buf[100];
+    	reset_buf[0] = 0xff;
+        printf("looping\n");
+        nrf_delay_ms(1);
+        uint8_t tx_data[100];
+        tx_data[0] = 0x0c;
+        tx_data[1] = 0x00;
+        uint8_t rx_data[400];
+        uint16_t rx_len;
+
+        // send tlv request
+        ret_code_t error_code = nrf_drv_spi_init(spi_instance, &dwm_spi_config, NULL, NULL);
+  		//APP_ERROR_CHECK(error_code);
+        ret_code_t err_code = nrf_drv_spi_transfer(spi_instance, tx_data, 2, NULL, 0);
+
+    	if (error_code != 0 )
+    		printf("err_code %d\n", error_code);
+
+    	// check for response
+        err_code = nrf_drv_spi_transfer(spi_instance, NULL, 0, rx_data, 2);
+    	if (error_code != 0 )
+    		printf("err_code %d\n", error_code);
+
+        while(rx_data[0] == 0x00) {
+            err_code = nrf_drv_spi_transfer(spi_instance, NULL, 0, rx_data, 2);
+        	if (error_code != 0 )
+    			printf("err_code %d\n", error_code);
+        }
+
+	    printf("size: %x num: %x \n",rx_data[0],rx_data[1]);
+
+        // if error, send reset
+        if (rx_data[0] == 0x40) {
+        	printf("reset\n");
+			error_code = nrf_drv_spi_transfer(spi_instance, reset_buf, 1, NULL, 0);
+			if (error_code != 0 )
+				printf("err_code %d\n", error_code);
+		} else {
+	        int num = rx_data[0];
+
+	        // recieve response
+	        err_code = nrf_drv_spi_transfer(spi_instance, NULL, 0, rx_data, rx_data[0]);
+	        
+	        if (error_code != 0 )
+    			printf("err_code %d\n", error_code);
+
+	        //printf("received: %s", rx_data);
+	        
+
+    		if (error_code != 0 )
+	    		printf("err_code %d\n", error_code);
+
+	        for(int i=0;i<num;i++){
+	            printf("%x ",rx_data[i]);
+	        }
+	        printf("\n");
+
+    	}
+    	nrf_drv_spi_uninit(spi_instance);
+
+    	
+  		nrf_drv_spi_init(&spi_instance_display, &display_spi_config, NULL, NULL);
+		display_init(&spi_instance_display);
+  		display_write("UWB distance",DISPLAY_LINE_0);
+  		
+  		char display_distance[100];
+
+  		char val[100];
 
 
+  		sprintf(val, "%06d mm", rx_data[24] << 8 | rx_data[23]);
+  		strcpy(display_distance, val);
 
-int dwm_loc_get(dwm_loc_data_t* loc)
-{ 
-   uint8_t tx_data[DWM1001_TLV_MAX_SIZE], tx_len = 0;
-   uint8_t rx_data[DWM1001_TLV_MAX_SIZE];
-   uint16_t rx_len;
-   uint8_t data_cnt, i, j;
-   
-   tx_data[tx_len++] = DWM1001_TLV_TYPE_CMD_LOC_GET;
-   tx_data[tx_len++] = 0;
-   //update_message(tx_data, 2);  
-   // LMH_Tx(tx_data, &tx_len);   
-   // initial spi
-   nrf_drv_spi_init(spi_instance, &dwm_spi_config, NULL, NULL);
-   // send TLV request
-   ret_code_t err = nrf_drv_spi_transfer(spi_instance, tx_data, tx_len, NULL, 0);
-   if (err != NRF_SUCCESS) {
-   	 return NULL;
-   }
+  		display_write(display_distance,DISPLAY_LINE_1);
+  		nrf_drv_spi_uninit(&spi_instance_display);
+  		
+  		if(switch_flag == 1||flag!=0)
+  			break;
 
-   // get (size per transmission, num_transitions)
-   uint8_t size_num[2];
-   err = nrf_drv_spi_transfer(spi_instance, NULL, 0, size_num, 2);
-   while(size_num[0] == 0x00) {
-    
-    if (err != NRF_SUCCESS) {
-      return NULL;
-    }
-    nrf_delay_ms(10);
-    err= nrf_drv_spi_transfer(spi_instance, NULL, 0, size_num, 2);
-   }
-   printf("%x %x\n", size_num[0], size_num[1]);
-
-   //reading data
-   err = nrf_drv_spi_transfer(spi_instance, NULL, 0, rx_data, size_num[0]);
-   rx_len = strlen(*rx_data);
-   if (err != NRF_SUCCESS) {
-   	return NULL;
-   }
-   
-   int k = 0;
-  	while (k < size_num[0]) {
-  		printf("%x ", rx_data[k++]);
   	}
-  	printf("\n");
-  	nrf_delay_ms(1000);
+  	
 
-   // if(LMH_WaitForRx(rx_data, &rx_len, DWM1001_TLV_MAX_SIZE) == RV_OK)
-   if(err == NRF_SUCCESS)
-   {
-      if(rx_len<RESP_ERRNO_LEN+RESP_DATA_LOC_LOC_SIZE + RESP_DATA_LOC_DIST_LEN_MIN)// ok + pos + distance/range
-      {
-      	 
-         nrf_drv_spi_uninit(spi_instance);
-         return RV_ERR;
-      }
-      
-      if(rx_data[RESP_DAT_TYPE_OFFSET]==DWM1001_TLV_TYPE_POS_XYZ)//0x41
-      {
-         // node self position.
-         data_cnt = RESP_DAT_VALUE_OFFSET;// jump Type and Length, goto data
-         loc->p_pos->x = rx_data[data_cnt] 
-                      + (rx_data[data_cnt+1]<<8) 
-                      + (rx_data[data_cnt+2]<<16) 
-                      + (rx_data[data_cnt+3]<<24); 
-         data_cnt += 4;
-         loc->p_pos->y = rx_data[data_cnt] 
-                      + (rx_data[data_cnt+1]<<8) 
-                      + (rx_data[data_cnt+2]<<16) 
-                      + (rx_data[data_cnt+3]<<24); 
-         data_cnt += 4;
-         loc->p_pos->z = rx_data[data_cnt] 
-                      + (rx_data[data_cnt+1]<<8) 
-                      + (rx_data[data_cnt+2]<<16) 
-                      + (rx_data[data_cnt+3]<<24); 
-         data_cnt += 4;
-         loc->p_pos->qf = rx_data[data_cnt++];
-      }
-      
-      if(rx_data[RESP_DATA_LOC_DIST_OFFSET]==DWM1001_TLV_TYPE_RNG_AN_DIST)//0x48
-      {
-         // node is Anchor, recording Tag ID, distances and qf
-         loc->anchors.dist.cnt = rx_data[RESP_DATA_LOC_DIST_OFFSET+2];
-         loc->anchors.an_pos.cnt = 0;
-         data_cnt = RESP_DATA_LOC_DIST_OFFSET + 3; // jump Type, Length and cnt, goto data
-         for (i = 0; i < loc->anchors.dist.cnt; i++)
-         {
-            // Tag ID
-            loc->anchors.dist.addr[i] = 0;
-            for (j = 0; j < 8; j++)
-            {
-               loc->anchors.dist.addr[i] += rx_data[data_cnt++]<<(j*8);
-            }
-            // Tag distance
-            loc->anchors.dist.dist[i] = 0;
-            for (j = 0; j < 4; j++)
-            {
-               loc->anchors.dist.dist[i] += rx_data[data_cnt++]<<(j*8);
-            }
-            // Tag qf
-            loc->anchors.dist.qf[i] = rx_data[data_cnt++];
-         }
-      }
-      else if (rx_data[RESP_DATA_LOC_DIST_OFFSET]==DWM1001_TLV_TYPE_RNG_AN_POS_DIST)//0x49
-      {
-         // node is Tag, recording Anchor ID, distances, qf and positions
-         loc->anchors.dist.cnt = rx_data[RESP_DATA_LOC_DIST_OFFSET+2];
-         loc->anchors.an_pos.cnt = rx_data[RESP_DATA_LOC_DIST_OFFSET+2];
-         data_cnt = RESP_DATA_LOC_DIST_OFFSET + 3; // jump Type, Length and cnt, goto data
-         for (i = 0; i < loc->anchors.dist.cnt; i++)
-         {
-            // anchor ID
-            loc->anchors.dist.addr[i] = 0;
-            for (j = 0; j < 2; j++)
-            {
-               loc->anchors.dist.addr[i] += ((uint64_t)rx_data[data_cnt++])<<(j*8);
-            }
-            // anchor distance
-            loc->anchors.dist.dist[i] = 0;
-            for (j = 0; j < 4; j++)
-            {
-               loc->anchors.dist.dist[i] += ((uint32_t)rx_data[data_cnt++])<<(j*8);
-            }
-            // anchor qf
-            loc->anchors.dist.qf[i] = rx_data[data_cnt++];
-            // anchor position
-            loc->anchors.an_pos.pos[i].x  = rx_data[data_cnt] 
-                                         + (rx_data[data_cnt+1]<<8) 
-                                         + (rx_data[data_cnt+2]<<16) 
-                                         + (rx_data[data_cnt+3]<<24); 
-            data_cnt += 4;
-            loc->anchors.an_pos.pos[i].y = rx_data[data_cnt] 
-                                         + (rx_data[data_cnt+1]<<8) 
-                                         + (rx_data[data_cnt+2]<<16) 
-                                         + (rx_data[data_cnt+3]<<24); 
-            data_cnt += 4;
-            loc->anchors.an_pos.pos[i].z = rx_data[data_cnt] 
-                                         + (rx_data[data_cnt+1]<<8) 
-                                         + (rx_data[data_cnt+2]<<16) 
-                                         + (rx_data[data_cnt+3]<<24); 
-            data_cnt += 4;
-            loc->anchors.an_pos.pos[i].qf = rx_data[data_cnt++];
-         }
-      }
-      else
-      {
-      	
-         nrf_drv_spi_uninit(spi_instance);
-         return RV_ERR;   
-      }
-   }
-   else
-   {
-
-      nrf_drv_spi_uninit(spi_instance);
-      return RV_ERR;   
-   }
-   nrf_drv_spi_uninit(spi_instance);
-   return RV_OK;
 }
 
-
-
-int get_loc(void)
-{
-   // ========== dwm_loc_get ==========
-   int rv, err_cnt = 0, i; 
-   
-   dwm_loc_data_t loc;
-   dwm_pos_t pos;
-   loc.p_pos = &pos;
-   printf("dwm_loc_get(&loc)\n");
-   rv = Test_CheckTxRx(dwm_loc_get(&loc));
-   
-   gettimeofday(&tv,NULL);      
-      
-   if(rv == RV_OK)
-   {
-      printf("ts:%ld.%06ld [%d,%d,%d,%u]\n", tv.tv_sec, tv.tv_usec, loc.p_pos->x, loc.p_pos->y, loc.p_pos->z, loc.p_pos->qf);
-      printf("ts:%ld.%06ld [%d,%d,%d,%u]", tv.tv_sec, tv.tv_usec, loc.p_pos->x, loc.p_pos->y, loc.p_pos->z, loc.p_pos->qf);
-
-      for (i = 0; i < loc.anchors.dist.cnt; ++i) 
-      {
-         // HAL_Log("#%u)", i);
-         printf("#%u)", i);
-         // HAL_Log("a:0x%08x", loc.anchors.dist.addr[i]);
-         printf("a:0x%08x", loc.anchors.dist.addr[i]);
-         if (i < loc.anchors.an_pos.cnt) 
-         {
-            // HAL_Log("[%d,%d,%d,%u]", loc.anchors.an_pos.pos[i].x,
-            //       loc.anchors.an_pos.pos[i].y,
-            //       loc.anchors.an_pos.pos[i].z,
-            //       loc.anchors.an_pos.pos[i].qf);
-            printf("[%d,%d,%d,%u]", loc.anchors.an_pos.pos[i].x,
-                  loc.anchors.an_pos.pos[i].y,
-                  loc.anchors.an_pos.pos[i].z,
-                  loc.anchors.an_pos.pos[i].qf);
-         }
-         // HAL_Log("d=%u,qf=%u\n", loc.anchors.dist.dist[i], loc.anchors.dist.qf[i]);
-         printf("d=%u,qf=%u", loc.anchors.dist.dist[i], loc.anchors.dist.qf[i]);
-      }
-         // HAL_Log("\n");
-         printf("\n");
-   }
-   err_cnt += rv;   
-   
-   return err_cnt;
-}
-
-int dwm_int_cfg_set(uint16_t value)
-{        
-   uint8_t tx_data[DWM1001_TLV_MAX_SIZE], tx_len = 0;
-   uint8_t rx_data[DWM1001_TLV_MAX_SIZE];
-   uint16_t rx_len;
-   tx_data[tx_len++] = DWM1001_TLV_TYPE_CMD_INT_CFG_SET;
-   tx_data[tx_len++] = 2;
-   tx_data[tx_len++] = value & 0xff;    
-   tx_data[tx_len++] = (value>>8) & 0xff;   
-   //LMH_Tx(tx_data, &tx_len);   
-   nrf_drv_spi_init(spi_instance, &dwm_spi_config, NULL, NULL);
-   update_message(tx_data, tx_len);
-   ret_code_t err = nrf_drv_spi_transfer(spi_instance, tx_data, tx_len, NULL, 0);
-   if (err != NRF_SUCCESS) {
-      return NULL;
-    }
-
-   // get (size per transmission, num_transitions)
-   uint8_t size_num[2];
-   err = nrf_drv_spi_transfer(spi_instance, NULL, 0, size_num, 2);
-   while(size_num[0] == 0x00) {
-    
-    if (err != NRF_SUCCESS) {
-      return NULL;
-    }
-    nrf_delay_ms(10);
-    err= nrf_drv_spi_transfer(spi_instance, NULL, 0, size_num, 2);
-   }
-   printf("size: %x num: %x\n", size_num[0], size_num[1]);
-
-   //reading data
-   err = nrf_drv_spi_transfer(spi_instance, NULL, 0, rx_data, size_num[0]);
-   rx_len = strlen(*rx_data);
-   if (err != NRF_SUCCESS) {
-   	return NULL;
-   }
-   nrf_drv_spi_uninit(spi_instance);
-   return (rx_data[0] == 0x40);
-   
-   //return LMH_WaitForRx(rx_data, &rx_len, 3);
-   //return (err == NRF_SUCCESS);
-}
-
-
-
-void spi_les_test(void)
-{   
-   // int err_cnt = 0;  
-   // uint16_t panid;
-   // uint16_t ur_set;
-   // uint16_t ur_s_set;
-   
-   //initializing spi (no need)
-   // {//init
-   //    printf("Initializing...\n"); 
-   //    dwm_init();
-   //    err_cnt += frst();
-   //    printf("Done\n");
-   // }
-   
-   /* ========= published APIs =========*/
-   
-   
-   
-   // setup tag update rate
-   //ur_s_set = ur_set = 1;
-   // HAL_Log("dwm_upd_rate_set(ur_set, ur_s_set);\n");
-   //dwm_upd_rate_set(ur_set, ur_s_set);
-   
-   // setup PANID
-   //panid = 1;
-   // printf("dwm_panid_set(panid);\n");
-   //dwm_panid_set(panid);
-   
-   // setup GPIO interrupt from "LOC_READY" event
-   // HAL_Log("dwm_int_cfg_set(DWM1001_INTR_LOC_READY);\n");
-   
-   // HAL_GPIO_SetupCb(HAL_GPIO_DRDY, HAL_GPIO_INT_EDGE_RISING, &gpio_cb);
-   
-   // setup encryption key for network
-   // setup_enc();
-   
-   // while(1)
-   // {
-   	
-      if(data_ready == 1)
-      {
-         data_ready = 0;
-         get_loc();
-      }
-      nrf_delay_ms(1);
-   // }
-   
-   // printf("err_cnt = %d \n", err_cnt);
-      
-   // Test_End();
-}
 
 
 int main(void) {
   // initialize RTT library
   ret_code_t error_code = NRF_SUCCESS;
   error_code = NRF_LOG_INIT(NULL);
-  APP_ERROR_CHECK(error_code);
+  //APP_ERROR_CHECK(error_code);
   NRF_LOG_DEFAULT_BACKENDS_INIT();
   printf("Log initialized!\n");
 
@@ -1415,7 +1243,7 @@ int main(void) {
     .ss_pin = DWM_CS,
     .irq_priority = NRFX_SPI_DEFAULT_CONFIG_IRQ_PRIORITY,
     .orc = 0,
-    .frequency = NRF_DRV_SPI_FREQ_1M,
+    .frequency = NRF_DRV_SPI_FREQ_4M,
     .mode = NRF_DRV_SPI_MODE_0,
     .bit_order = NRF_DRV_SPI_BIT_ORDER_MSB_FIRST
   };
@@ -1453,16 +1281,16 @@ int main(void) {
 
 
   nrf_gpio_pin_dir_set(RFM95_RST, NRF_GPIO_PIN_DIR_OUTPUT);
-  nrf_gpio_pin_dir_set(DWM_RST, NRF_GPIO_PIN_DIR_OUTPUT);
+  //nrf_gpio_pin_dir_set(DWM_RST, NRF_GPIO_PIN_DIR_OUTPUT);
   nrf_gpio_pin_write(RFM95_RST, 1);
-  nrf_gpio_pin_write(DWM_RST, 1);
+  //nrf_gpio_pin_write(DWM_RST, 1);
   printf("Arduino LoRa TX Test!\n");
   // manual reset
   nrf_gpio_pin_write(RFM95_RST, 0);
-  nrf_gpio_pin_write(DWM_RST, 0);
+  //nrf_gpio_pin_write(DWM_RST, 0);
   nrf_delay_ms(10);
   nrf_gpio_pin_write(RFM95_RST, 1);
-  nrf_gpio_pin_write(DWM_RST, 1);
+  //nrf_gpio_pin_write(DWM_RST, 1);
   nrf_delay_ms(10);
 
 
@@ -1481,19 +1309,31 @@ int main(void) {
   // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then 
   // you can set transmitter powers from 5 to 23 dBm:
   setTxPower(23, false);
+
+  error_code = nrf_drv_spi_init(spi_instance, &dwm_spi_config, NULL, NULL);
+  //APP_ERROR_CHECK(error_code);
+
+  uint8_t reset_buf[100];
+  reset_buf[0] = 0xff;
+
+  error_code = nrf_drv_spi_transfer(spi_instance, reset_buf, 1, NULL, 0);
+  nrf_drv_spi_uninit(spi_instance);
   
 
   while (1) {
-    //spi_les_test();
-  	//get_loc();
-  	//nrf_delay_ms(1000);
+  	
+    
 
     if(flag != 0){
       loop_button(flag);
     }
-    else{
-    	loop();
+    if(switch_flag==0){
+    	get_loc();
     }
+    else
+    	loop_switch();
+    // else{
+    // 	loop();
+    // }
   }
 }
-
