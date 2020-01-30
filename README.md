@@ -10,7 +10,7 @@
 Use several wireless communication technologies (UWB, BLE, LoRa) and sensor readings (GPS and camera) from a collar to track a cat.
 
 #### **Approach**
-The collar will be turned on/off via BLE. We’ll use different sets of modules based on whether the sensed distance exceeds a constant threshold d.
+The collar will be turned on/off via BLE. We’ll use different sets of modules based on whether the sensed distance exceeds a constant threshold.
 Short range (distance <  d): UWB (localization), AV receiver + camera (high-quality video)
 Long range (distance > d): LoRa + GPS (location), BLE + camera (low-quality video)
 Surplus time could be spent switching to an infrared/night vision camera after a certain time of day, or developing a communication protocol to transmit video over LoRaWAN.
